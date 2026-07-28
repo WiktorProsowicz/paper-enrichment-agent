@@ -1,0 +1,40 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/docker-in-docker
+{
+	"name": "Dev Environment",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"features": {
+		"ghcr.io/devcontainers/features/docker-in-docker:2": {
+			"version": "latest",
+			"moby": false
+		}
+	},
+	"workspaceMount": "source=${localWorkspaceFolder},target=/home/ubuntu/workspace,type=bind",
+	"workspaceFolder": "/home/ubuntu/workspace",
+	"mounts": [
+		"type=bind,source=${localEnv:SSH_AUTH_SOCK},target=/ssh-agent"
+	],
+	"remoteUser": "ubuntu",
+	"remoteEnv": {
+		"SSH_AUTH_SOCK": "/ssh-agent",
+		"GIT_CONFIG_GLOBAL": "/home/ubuntu/.gitconfig"
+	},
+	"overrideCommand": true,
+	"postCreateCommand": "/bin/bash .devcontainer/res/post_create_command.bash",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"skellock.just",
+				"ms-python.python",
+				"tamasfe.even-better-toml",
+				"VisualStudioExptTeam.vscodeintellicode",
+				"mhutchie.git-graph",
+				"eamodio.gitlens",
+				"ms-python.mypy-type-checker",
+				"charliermarsh.ruff"
+			]
+		}
+	}
+}
