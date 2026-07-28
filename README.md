@@ -14,6 +14,10 @@ You realize that you are unlikely to grasp the topic fully without additional co
 - Each reference to a paper is automatically expanded into a context-aware citation that provides relevant quotes, figures and tables from the cited paper
 - Each processed reference paper is effectively converted into a set of footnotes, which explain the context of the citation and provide additional background information
 
+## Architecture
+
+![Architecture](docs/architecture.drawio.png)
+
 ## Changelog
 
 The changes are provided in the [CHANGELOG.md](CHANGELOG.md) file.
