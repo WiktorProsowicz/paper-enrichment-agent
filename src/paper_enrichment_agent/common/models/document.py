@@ -1,5 +1,6 @@
 """Contains the definitions of document components."""
 
+import uuid
 from typing import Annotated, Literal
 
 import pydantic
@@ -7,25 +8,39 @@ from pydantic import Field
 
 
 class DocumentComponent(pydantic.BaseModel):
-    """Base class for all components in a document."""
+    """Base class for all components in a document.
 
-    component_id: Annotated[str, Field(description='Identifier of the component.')]
-    description: Annotated[str | None, Field(description='Optional description of the component.')]
+    By design each component should have a unique identifier in scope of the children of its parent
+    in the document tree. This allows to unambiguously reference a component by a `path`. A `path`
+    should be a posix-tyle absolute path from the root of the document tree to the referenced
+    component.
+    """
+
+    component_id: Annotated[str, Field(description='Identifier of the component.')] = (
+        uuid.uuid4().hex
+    )
+
+    description: Annotated[
+        str | None, Field(description='Optional description of the component.')
+    ] = None
+
+    def __str__(self) -> str:
+        return f'{self.__class__.__name__}(component_id="{self.component_id}")'
 
 
 class Reference(DocumentComponent):
     """Represents a reference to another component in the document."""
 
-    target_path: Annotated[
+    target: Annotated[
         str,
         Field(
             description=(
-                'A path to the target component being referenced.'
-                'A component path is a Posix-style path that uniquely identifies a'
-                'component in the document.'
+                'The target of the reference.'
+                'This can be either a string identifier or a path to the target component.'
             )
         ),
     ]
+    content_text: Annotated[str, Field(description='Textual content of the reference.')]
 
 
 class MathExpression(DocumentComponent):
@@ -94,9 +109,11 @@ class Section(DocumentComponent):
     structure within the document.
     """
 
+    type SectionComponent = Paragraph | Figure | Section | MathExpression
+
     title: Annotated[str, Field(description='The title of the section.')]
     components: Annotated[
-        list[DocumentComponent], Field(description='List of components in the section.')
+        list[SectionComponent], Field(description='List of components in the section.')
     ]
 
 
@@ -111,5 +128,5 @@ class Document(pydantic.BaseModel):
     sections: Annotated[list[Section], Field(description='List of sections in the document.')]
     footnotes: Annotated[list[Footnote], Field(description='List of footnotes in the document.')]
     referenced_papers: Annotated[
-        list['Document' | str], Field(description='List of reference papers in the document.')
+        list[str], Field(description='List of reference papers in the document.')
     ]
