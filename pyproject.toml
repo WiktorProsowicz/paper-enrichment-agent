@@ -11,8 +11,11 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "magicmock>=0.3",
     "mypy>=2.3.0",
     "pre-commit>=4.6.1",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
     "ruff>=0.16.0",
 ]
 
@@ -32,6 +35,7 @@ select = [
     "SIM", # simplifications
 ]
 ignore = ["W191"]
+exclude = ["tests"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -41,6 +45,11 @@ quote-style = "single"
 indent-style = "space"
 line-ending = "auto"
 
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+
 [tool.mypy]
 disable_error_code = "import-untyped"
 strict = true
+exclude = ["tests"]
