@@ -2,7 +2,7 @@
 build_project_dev:
     @echo "Building project in development mode..."
     uv venv --python 3.12
-    uv sync
+    uv sync --group dev
     uv pip install -e .
 
 # Runs local checks for code quality and formatting
