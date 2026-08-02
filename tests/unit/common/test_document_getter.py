@@ -67,7 +67,15 @@ def sample_document():
                 ],
             ),
         ],
-        footnotes=[],
+        footnotes=[
+            doc_models.Paragraph(
+                component_id='footnote_1',
+                elements=['This is a footnote.'],
+            ),
+            doc_models.MathExpression(
+                component_id='footnote_2', expression='a^2 + b^2 = c^2', format='LaTeX'
+            ),
+        ],
         referenced_papers=[],
     )
 
@@ -76,22 +84,33 @@ def sample_document():
 def expected_paths(sample_document):
 
     return (
-        ('/section_1', sample_document.sections[0]),
-        ('/section_1/paragraph_1', sample_document.sections[0].components[0]),
-        ('/section_1/figure_1', sample_document.sections[0].components[1]),
+        ('/sections/section_1', sample_document.sections[0]),
+        ('/sections/section_1/paragraph_1', sample_document.sections[0].components[0]),
+        ('/sections/section_1/figure_1', sample_document.sections[0].components[1]),
         (
-            '/section_1/figure_1/img_subfig_1',
+            '/sections/section_1/figure_1/img_subfig_1',
             sample_document.sections[0].components[1].subfigures[0],
         ),
         (
-            '/section_1/figure_1/table_subfig_1',
+            '/sections/section_1/figure_1/table_subfig_1',
             sample_document.sections[0].components[1].subfigures[1],
         ),
-        ('/section_2', sample_document.sections[1]),
-        ('/section_2/paragraph_2', sample_document.sections[1].components[0]),
-        ('/section_2/math_expr_1', sample_document.sections[1].components[1]),
-        ('/section_2/math_expr_2', sample_document.sections[1].components[2]),
-        ('/section_1/paragraph_1/ref_1', sample_document.sections[0].components[0].elements[1]),
+        ('/sections/section_2', sample_document.sections[1]),
+        ('/sections/section_2/paragraph_2', sample_document.sections[1].components[0]),
+        ('/sections/section_2/math_expr_1', sample_document.sections[1].components[1]),
+        ('/sections/section_2/math_expr_2', sample_document.sections[1].components[2]),
+        (
+            '/sections/section_1/paragraph_1/ref_1',
+            sample_document.sections[0].components[0].elements[1],
+        ),
+        (
+            '/footnotes/footnote_1',
+            sample_document.footnotes[0],
+        ),
+        (
+            '/footnotes/footnote_2',
+            sample_document.footnotes[1],
+        ),
     )
 
 
@@ -113,13 +132,13 @@ class TestDocumentGetter:
         getter = DocumentGetter(sample_document)
 
         paragraphs = list(getter.iter_components_of_type(doc_models.Paragraph))
-        assert len(paragraphs) == 2
+        assert len(paragraphs) == 3
 
         figures = list(getter.iter_components_of_type(doc_models.Figure))
         assert len(figures) == 1
 
         math_expressions = list(getter.iter_components_of_type(doc_models.MathExpression))
-        assert len(math_expressions) == 2
+        assert len(math_expressions) == 3
 
         references = list(getter.iter_components_of_type(doc_models.Reference))
         assert len(references) == 1

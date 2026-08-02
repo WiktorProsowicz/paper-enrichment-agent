@@ -26,7 +26,12 @@ class DocumentGetter:
         """
 
         for section in self._document.sections:
-            for path, component in self._iter_section_components(section):
+            for path, component in self._iter_section_components(section, root_path='/sections'):
+                if component == target_component:
+                    return path
+
+        for footnote in self._document.footnotes:
+            for path, component in self._iter_component(footnote, root_path='/footnotes'):
                 if component == target_component:
                     return path
 
@@ -40,7 +45,12 @@ class DocumentGetter:
         """
 
         for section in self._document.sections:
-            for path, component in self._iter_section_components(section):
+            for path, component in self._iter_section_components(section, root_path='/sections'):
+                if path == target_path:
+                    return component
+
+        for footnote in self._document.footnotes:
+            for path, component in self._iter_component(footnote, root_path='/footnotes'):
                 if path == target_path:
                     return component
 
@@ -52,9 +62,34 @@ class DocumentGetter:
         """Returns all components of the specified type from the document."""
 
         for section in self._document.sections:
-            for _, component in self._iter_section_components(section):
+            for _, component in self._iter_section_components(section, root_path='/sections'):
                 if isinstance(component, component_type):
                     yield component
+
+        for footnote in self._document.footnotes:
+            for _, component in self._iter_component(footnote, root_path='/footnotes'):
+                if isinstance(component, component_type):
+                    yield component
+
+    def _iter_component(
+        self, component: doc_models.DocumentComponent, root_path: str
+    ) -> Iterator[tuple[str, doc_models.DocumentComponent]]:
+        """Recursively iterates over all components in a document component.
+
+        For each component, yields a tuple containing the path to the component and the component.
+        """
+
+        if isinstance(component, doc_models.Section):
+            yield from self._iter_section_components(component, root_path)
+
+        elif isinstance(component, doc_models.Paragraph):
+            yield from self._iter_paragraph_components(component, root_path)
+
+        elif isinstance(component, doc_models.Figure):
+            yield from self._iter_figure_components(component, root_path)
+
+        else:
+            yield f'{root_path}/{component.component_id}', component
 
     def _iter_section_components(
         self,
@@ -71,17 +106,7 @@ class DocumentGetter:
         yield section_path, section
 
         for component in section.components:
-            if isinstance(component, doc_models.Figure):
-                yield from self._iter_figure_components(component, section_path)
-
-            elif isinstance(component, doc_models.Paragraph):
-                yield from self._iter_paragraph_components(component, section_path)
-
-            elif isinstance(component, doc_models.Section):
-                yield from self._iter_section_components(component, section_path)
-
-            else:
-                yield f'{section_path}/{component.component_id}', component
+            yield from self._iter_component(component, section_path)
 
     def _iter_paragraph_components(
         self, paragraph: doc_models.Paragraph, root_path: str

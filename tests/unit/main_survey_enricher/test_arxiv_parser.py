@@ -206,7 +206,7 @@ class TestArxivParser:
 
         doc_getter = DocumentGetter(document)
 
-        chosen_paragraph = doc_getter.get_component_by_path('/S3/S3.SS2/S3.SS2.p1.8')
+        chosen_paragraph = doc_getter.get_component_by_path('/sections/S3/S3.SS2/S3.SS2.p1.8')
 
         assert chosen_paragraph.elements[0] == 'The length regulator (Figure '
         assert chosen_paragraph.elements[1].content_text == '1(c)'

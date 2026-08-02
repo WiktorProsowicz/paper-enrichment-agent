@@ -114,23 +114,6 @@ class Paragraph(DocumentComponent):
     ]
 
 
-class Footnote(DocumentComponent):
-    """Represents a footnote in a document.
-
-    A footnote is an element, referenced in the document, that provides additional information or
-    context to the main content. It is designed to be placed at the end of the chapter / document.
-    A footnote is not necessarily a single text, but rather an entire named section.
-    """
-
-    title: Annotated[str, Field(description='The title of the footnote.')]
-    components: Annotated[
-        list[DocumentComponent], Field(description='List of components in the footnote.')
-    ]
-    referrer: Annotated[
-        str | None, Field(description='The component that references the footnote.')
-    ]
-
-
 class Section(DocumentComponent):
     """Represents a section in a document.
 
@@ -152,12 +135,17 @@ class Document(pydantic.BaseModel):
 
     The class is a universal interface that can be used to represent either a survey during the
     enrichment process or a document referenced by the survey.
+
+    Paths to the primary components of the document should start with /sections.
+    Paths to the footnotes of the document should start with /footnotes.
     """
 
     abstract: Annotated[str, Field(description='The abstract of the document.')]
     description: Annotated[str | None, Field(description='Optional description of the document.')]
     sections: Annotated[list[Section], Field(description='List of sections in the document.')]
-    footnotes: Annotated[list[Footnote], Field(description='List of footnotes in the document.')]
+    footnotes: Annotated[
+        list[DocumentComponent], Field(description='List of footnotes in the document.')
+    ]
     referenced_papers: Annotated[
         list[tuple[str, str]],
         Field(description='List of (id, ref description) for reference papers in the document.'),
