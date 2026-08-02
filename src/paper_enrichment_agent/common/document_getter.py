@@ -71,7 +71,10 @@ class DocumentGetter:
         yield section_path, section
 
         for component in section.components:
-            if isinstance(component, doc_models.Paragraph):
+            if isinstance(component, doc_models.Figure):
+                yield from self._iter_figure_components(component, section_path)
+
+            elif isinstance(component, doc_models.Paragraph):
                 yield from self._iter_paragraph_components(component, section_path)
 
             elif isinstance(component, doc_models.Section):
@@ -93,3 +96,16 @@ class DocumentGetter:
         for element in paragraph.elements:
             if isinstance(element, doc_models.DocumentComponent):
                 yield f'{root_path}/{paragraph.component_id}/{element.component_id}', element
+
+    def _iter_figure_components(
+        self, figure: doc_models.Figure, root_path: str
+    ) -> Iterator[tuple[str, doc_models.DocumentComponent]]:
+        """Iterates over all subfigures in a figure.
+
+        For each subfigure, yields a tuple containing the path to the subfigure and the subfigure.
+        """
+
+        yield f'{root_path}/{figure.component_id}', figure
+
+        for subfigure in figure.subfigures:
+            yield f'{root_path}/{figure.component_id}/{subfigure.component_id}', subfigure

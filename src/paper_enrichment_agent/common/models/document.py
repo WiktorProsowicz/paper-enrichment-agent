@@ -27,16 +27,24 @@ class DocumentComponent(pydantic.BaseModel):
     def __str__(self) -> str:
         return f'{self.__class__.__name__}(component_id="{self.component_id}")'
 
+    def __repr__(self) -> str:
+        return self.__str__()
+
 
 class Reference(DocumentComponent):
     """Represents a reference to another component in the document."""
 
+    ref_type: Annotated[
+        Literal['citation', 'element', 'link'], Field(description='Type of the reference.')
+    ]
     target: Annotated[
         str,
         Field(
             description=(
                 'The target of the reference.'
-                'This can be either a string identifier or a path to the target component.'
+                'For `citation` references, this is the ID of the cited work.'
+                'For `element` references, this is the path to the referenced component.'
+                'For `link` references, this is the URL of the linked resource.'
             )
         ),
     ]
@@ -57,15 +65,37 @@ class MathExpression(DocumentComponent):
     ]
 
 
+class TableSubfigure(DocumentComponent):
+    """Represents a table in a document."""
+
+    table_contents: Annotated[
+        str,
+        Field(description='The HTML contents of the table.'),
+    ]
+    caption: Annotated[str | None, Field(description='The caption of the table.')]
+
+
+class ImgSubfigure(DocumentComponent):
+    """Represents an image in a document."""
+
+    image_src: Annotated[
+        str,
+        Field(description='The path / href of the image.'),
+    ]
+    caption: Annotated[str | None, Field(description='The caption of the image.')]
+
+
 class Figure(DocumentComponent):
     """Represents a figure in a document.
 
-    A figure is a component that represents a visual element, such as an image, chart, or diagram.
+    A figure is a distinct component that contains a structured visual representation, such as an
+    image, chart, diagram, table. The figure contains a caption describing its contents. It may
+    contain multiple subfigures, each with its own optional caption.
     """
 
-    image_paths: Annotated[
-        list[str], Field(description='List of paths to the images associated with the figure.')
-    ]
+    subfigures: list[TableSubfigure | ImgSubfigure] = Field(
+        description='List of subfigures in the figure.'
+    )
     caption: Annotated[str, Field(description='The caption of the figure.')]
 
 
@@ -125,8 +155,13 @@ class Document(pydantic.BaseModel):
     """
 
     abstract: Annotated[str, Field(description='The abstract of the document.')]
+    description: Annotated[str | None, Field(description='Optional description of the document.')]
     sections: Annotated[list[Section], Field(description='List of sections in the document.')]
     footnotes: Annotated[list[Footnote], Field(description='List of footnotes in the document.')]
     referenced_papers: Annotated[
-        list[str], Field(description='List of reference papers in the document.')
+        list[tuple[str, str]],
+        Field(description='List of (id, ref description) for reference papers in the document.'),
     ]
+
+    def __str__(self) -> str:
+        return f'Document(abstract="{self.abstract[:30]}...", sections={len(self.sections)})'

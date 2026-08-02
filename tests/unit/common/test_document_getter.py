@@ -8,6 +8,7 @@ from paper_enrichment_agent.common.document_getter import DocumentGetter
 def sample_document():
     return doc_models.Document(
         component_id='doc_1',
+        description='Sample document for testing.',
         abstract='Document abstract.',
         sections=[
             doc_models.Section(
@@ -20,6 +21,7 @@ def sample_document():
                             'This is a paragraph.',
                             doc_models.Reference(
                                 component_id='ref_1',
+                                ref_type='element',
                                 target='/section_2/paragraph_2',
                                 content_text='See Section 2, Paragraph 2',
                             ),
@@ -27,7 +29,21 @@ def sample_document():
                     ),
                     doc_models.Figure(
                         component_id='figure_1',
-                        image_paths=['/path/to/image1.png', '/path/to/image2.png'],
+                        description='This is a figure.',
+                        subfigures=[
+                            doc_models.ImgSubfigure(
+                                component_id='img_subfig_1',
+                                description='This is an image subfigure.',
+                                image_src='/images/sample_image.png',
+                                caption='This is an image subfigure.',
+                            ),
+                            doc_models.TableSubfigure(
+                                component_id='table_subfig_1',
+                                description='This is a table subfigure.',
+                                table_contents='<table><tr><td>Sample Table Content</td></tr></table>',
+                                caption='This is a table subfigure.',
+                            ),
+                        ],
                         caption='This is a figure.',
                     ),
                 ],
@@ -63,6 +79,14 @@ def expected_paths(sample_document):
         ('/section_1', sample_document.sections[0]),
         ('/section_1/paragraph_1', sample_document.sections[0].components[0]),
         ('/section_1/figure_1', sample_document.sections[0].components[1]),
+        (
+            '/section_1/figure_1/img_subfig_1',
+            sample_document.sections[0].components[1].subfigures[0],
+        ),
+        (
+            '/section_1/figure_1/table_subfig_1',
+            sample_document.sections[0].components[1].subfigures[1],
+        ),
         ('/section_2', sample_document.sections[1]),
         ('/section_2/paragraph_2', sample_document.sections[1].components[0]),
         ('/section_2/math_expr_1', sample_document.sections[1].components[1]),
@@ -71,7 +95,6 @@ def expected_paths(sample_document):
     )
 
 
-@pytest.mark.dependency(name='test_document_getter', scope='session')
 class TestDocumentGetter:
     def test_get_path_of_component(self, sample_document, expected_paths):
 
@@ -100,6 +123,12 @@ class TestDocumentGetter:
 
         references = list(getter.iter_components_of_type(doc_models.Reference))
         assert len(references) == 1
+
+        img_subfigures = list(getter.iter_components_of_type(doc_models.ImgSubfigure))
+        assert len(img_subfigures) == 1
+
+        table_subfigures = list(getter.iter_components_of_type(doc_models.TableSubfigure))
+        assert len(table_subfigures) == 1
 
     def test_get_component_by_path(self, sample_document, expected_paths):
         getter = DocumentGetter(sample_document)
