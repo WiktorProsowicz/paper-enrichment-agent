@@ -241,3 +241,23 @@ class TestArxivParser:
         assert isinstance(ref_1, doc_models.Reference)
         assert ref_1.ref_type == 'link'
         assert ref_1.target == 'https://speechresearch.github.io/fastspeech2/'
+
+    def test_parses_correct_footnotes(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_1)
+
+        assert len(document.footnotes) == 4
+
+        assert isinstance(document.footnotes[0], doc_models.Paragraph)
+        assert document.footnotes[0].elements[0] == 'Although ClariNet '
+        assert document.footnotes[0].elements[1].content_text == '18'
+        assert (
+            document.footnotes[0].elements[2]
+            == ' is fully end-to-end, it still first generates mel-spectrogram autoregressively and then synthesizes speech in one model.'
+        )
+
+        assert isinstance(document.footnotes[-1], doc_models.Paragraph)
+        assert (
+            document.footnotes[-1].elements[0]
+            == 'These cases include single letters, spellings, repeated numbers, and long sentences. We list the cases in the supplementary materials.'
+        )

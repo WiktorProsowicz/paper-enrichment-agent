@@ -35,11 +35,13 @@ class ArxivParser:
 
     def __init__(self) -> None:
 
-        # Maps component ids to the respective structs.
+        # Maps component ids to the respective structs
         self._referencable_components: dict[str, doc_models.DocumentComponent] = {}
 
         # Keeps track of the bibitem ids that have been processed
         self._bib_items_ids: set[str] = set()
+
+        self._footnotes: list[doc_models.DocumentComponent] = []
 
     def parse(self, paper_id: str) -> doc_models.Document:
         """Downloads and parses an arXiv paper into a structured format."""
@@ -66,6 +68,8 @@ class ArxivParser:
             footnotes=[],
             referenced_papers=self._extract_bibliography(soup),
         )
+
+        document.footnotes = self._footnotes.copy()
 
         self._resolve_references(document)
 
@@ -255,8 +259,28 @@ class ArxivParser:
                     )
                 )
 
+            elif 'ltx_note' in child['class']:
+                footnote = self._decode_paragraph(self._safe_select_one(child, '.ltx_note_content'))
+                footnote.description = 'Footnote'
+                footnote.component_id = str(child['id'])
+
+                self._referencable_components[footnote.component_id] = footnote
+                self._footnotes.append(footnote)
+
+                paragraph_contents.append(
+                    doc_models.Reference(
+                        component_id=str(child_idx),
+                        ref_type='element',
+                        description='Footnote reference',
+                        target=f'#{footnote.component_id}',
+                        content_text=self._safe_select_one(
+                            child, ':scope > .ltx_note_mark'
+                        ).get_text(strip=True),
+                    )
+                )
+
         return doc_models.Paragraph(
-            component_id=str(paragraph_tag['id']),
+            component_id=str(paragraph_tag['id']) if 'id' in paragraph_tag.attrs else '',
             description='Paragraph',
             elements=paragraph_contents,
         )
