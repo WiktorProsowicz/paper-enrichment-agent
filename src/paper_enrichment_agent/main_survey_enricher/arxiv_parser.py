@@ -72,12 +72,17 @@ class ArxivParser:
         return document
 
     def _resolve_references(self, document: doc_models.Document) -> None:
-        """Fixes the reference targets in the document to point to the correct components."""
+        """Fixes the reference targets and types after having processed the document."""
 
         doc_getter = document_getter.DocumentGetter(document)
 
         for reference in doc_getter.iter_components_of_type(doc_models.Reference):
             if reference.ref_type == 'element':
+                if not reference.target.startswith('#'):
+                    reference.ref_type = 'link'
+                    reference.description = 'External link reference'
+                    continue
+
                 component_id = reference.target[1:]
 
                 if re.match(r'.+\.sf\d+$', component_id) or re.match(r'.+\.st\d+$', component_id):
@@ -209,17 +214,18 @@ class ArxivParser:
 
         paragraph_contents: list[doc_models.Paragraph.InlineParagraphElement] = []
 
-        for child in paragraph_tag.children:
+        for child_idx, child in enumerate(paragraph_tag.children):
             if isinstance(child, NavigableString):
-                paragraph_contents.append(str(child))
+                paragraph_contents.append(re.sub(r'\s+', ' ', str(child)))
                 continue
 
             child = cast(bs4.Tag, child)
 
             if 'ltx_cite' in child['class']:
-                for link_tag in child.select('a.ltx_ref'):
+                for link_idx, link_tag in enumerate(child.select('a.ltx_ref')):
                     paragraph_contents.append(
                         doc_models.Reference(
+                            component_id=f'{child_idx}.{link_idx}',
                             ref_type='citation',
                             description='Citation reference',
                             target=str(link_tag['href'])[1:],
@@ -238,9 +244,10 @@ class ArxivParser:
                 self._referencable_components[math_exp.component_id] = math_exp
                 paragraph_contents.append(math_exp)
 
-            elif 'ltx_ref' in child['class'] and 'ltx_url' not in child['class']:
+            elif 'ltx_ref' in child['class']:
                 paragraph_contents.append(
                     doc_models.Reference(
+                        component_id=str(child_idx),
                         ref_type='element',
                         description='Element reference',
                         target=str(child['href']),

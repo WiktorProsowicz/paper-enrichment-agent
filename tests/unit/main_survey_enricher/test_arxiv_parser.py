@@ -213,3 +213,31 @@ class TestArxivParser:
         assert (
             chosen_paragraph.elements[7].expression == r'\mathcal{H}_{pho}=[h_{1},h_{2},...,h_{n}]'
         )
+
+    def test_parses_correct_references(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_1)
+        doc_getter = DocumentGetter(document)
+
+        ref_1 = doc_getter.get_component_by_path(
+            '/sections/S2/S2.SS0.SSS0.Px3/S2.SS0.SSS0.Px3.p1.1/3.0'
+        )
+
+        assert isinstance(ref_1, doc_models.Reference)
+        assert ref_1.ref_type == 'citation'
+        assert ref_1.target == 'bib.bib16'
+
+        ref_2 = doc_getter.get_component_by_path('/sections/S3/S3.SS2/S3.SS2.p1.21/11')
+
+        assert isinstance(ref_2, doc_models.Reference)
+        assert ref_2.ref_type == 'element'
+        assert ref_2.target == '/sections/S3/S3.SS2/S3.E1'
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_2)
+        doc_getter = DocumentGetter(document)
+
+        ref_1 = doc_getter.get_component_by_path('/sections/S1/S1.p3.1/5')
+
+        assert isinstance(ref_1, doc_models.Reference)
+        assert ref_1.ref_type == 'link'
+        assert ref_1.target == 'https://speechresearch.github.io/fastspeech2/'
