@@ -41,7 +41,7 @@ class ArxivParser:
         # Keeps track of the bibitem ids that have been processed
         self._bib_items_ids: set[str] = set()
 
-        self._footnotes: list[doc_models.DocumentComponent] = []
+        self._footnotes: list[doc_models.Document.FootnoteType] = []
 
     def parse(self, paper_id: str) -> doc_models.Document:
         """Downloads and parses an arXiv paper into a structured format."""

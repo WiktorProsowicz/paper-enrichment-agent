@@ -140,11 +140,13 @@ class Document(pydantic.BaseModel):
     Paths to the footnotes of the document should start with /footnotes.
     """
 
+    type FootnoteType = Paragraph | Section
+
     abstract: Annotated[str, Field(description='The abstract of the document.')]
     description: Annotated[str | None, Field(description='Optional description of the document.')]
     sections: Annotated[list[Section], Field(description='List of sections in the document.')]
     footnotes: Annotated[
-        list[DocumentComponent], Field(description='List of footnotes in the document.')
+        list[FootnoteType], Field(description='List of footnotes in the document.')
     ]
     referenced_papers: Annotated[
         list[tuple[str, str]],

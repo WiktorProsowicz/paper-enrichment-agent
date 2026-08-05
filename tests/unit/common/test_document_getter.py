@@ -72,8 +72,14 @@ def sample_document():
                 component_id='footnote_1',
                 elements=['This is a footnote.'],
             ),
-            doc_models.MathExpression(
-                component_id='footnote_2', expression='a^2 + b^2 = c^2', format='LaTeX'
+            doc_models.Section(
+                component_id='footnote_2',
+                title='Footnote Section',
+                components=[
+                    doc_models.MathExpression(
+                        component_id='math_expr', expression='a^2 + b^2 = c^2', format='LaTeX'
+                    ),
+                ],
             ),
         ],
         referenced_papers=[],
@@ -110,6 +116,10 @@ def expected_paths(sample_document):
         (
             '/footnotes/footnote_2',
             sample_document.footnotes[1],
+        ),
+        (
+            '/footnotes/footnote_2/math_expr',
+            sample_document.footnotes[1].components[0],
         ),
     )
 
@@ -148,6 +158,9 @@ class TestDocumentGetter:
 
         table_subfigures = list(getter.iter_components_of_type(doc_models.TableSubfigure))
         assert len(table_subfigures) == 1
+
+        sections = list(getter.iter_components_of_type(doc_models.Section))
+        assert len(sections) == 3
 
     def test_get_component_by_path(self, sample_document, expected_paths):
         getter = DocumentGetter(sample_document)
