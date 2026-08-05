@@ -1,12 +1,12 @@
-import pytest
-from unittest.mock import Mock
 import pathlib
+from unittest.mock import Mock
 
+import pytest
 import requests
 
-from paper_enrichment_agent.main_survey_enricher.arxiv_parser import ArxivParser
 from paper_enrichment_agent.common.document_getter import DocumentGetter
 from paper_enrichment_agent.common.models import document as doc_models
+from paper_enrichment_agent.main_survey_enricher.arxiv_parser import ArxivParser
 
 EXAMPLE_PAPER_1 = '1905.09263'
 EXAMPLE_PAPER_2 = '2006.04558'

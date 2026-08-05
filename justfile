@@ -20,7 +20,7 @@ run_unit_tests:
     @echo "Cleaning test results directory..."
     rm -rf test_results
     mkdir -p test_results
-    
+
     @echo "Running tests..."
     uv run python -m pytest --import-mode=prepend -s \
         tests/unit --tb=short -v \
@@ -29,7 +29,6 @@ run_unit_tests:
         --cov=src \
         --cov-report=html:test_results/coverage_html_report \
         --disable-warnings
-    
+
     @echo "Reporting coverage..."
     uv run coverage report
-
