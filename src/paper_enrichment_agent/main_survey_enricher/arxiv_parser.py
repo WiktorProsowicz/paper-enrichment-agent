@@ -141,6 +141,9 @@ class ArxivParser:
                             self._referencable_components[equation.component_id] = equation
                             components.append(equation)
 
+                    elif paragraph_tag.name == 'ol' or paragraph_tag.name == 'ul':
+                        components.append(self._decode_list(paragraph_tag))
+
             elif child.name == 'figure':
                 figure = self._decode_figure(child)
                 self._referencable_components[figure.component_id] = figure
@@ -158,6 +161,23 @@ class ArxivParser:
         self._referencable_components[section.component_id] = section
 
         return section
+
+    def _decode_list(self, list_tag: bs4.Tag) -> doc_models.List:
+        """Decodes a list from the given `list` tag paper."""
+
+        decoded_list = doc_models.List(
+            component_id=str(list_tag['id']),
+            ordered=list_tag.name == 'ol',
+            items=[],
+        )
+
+        for list_item_tag in list_tag.select('li.ltx_item'):
+            for item_para_tag in list_item_tag.select('p.ltx_p'):
+                paragraph_item = self._decode_paragraph(item_para_tag)
+                paragraph_item.description = f'Original item id: {list_item_tag["id"]}'
+                decoded_list.items.append(paragraph_item)
+
+        return decoded_list
 
     def _decode_equation(self, equation_tag: bs4.Tag) -> doc_models.MathExpression:
         """Decodes an equation from the given `equation` tag paper."""

@@ -261,3 +261,24 @@ class TestArxivParser:
             document.footnotes[-1].elements[0]
             == 'These cases include single letters, spellings, repeated numbers, and long sentences. We list the cases in the supplementary materials.'
         )
+
+    def test_parses_correct_lists(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_1)
+        doc_getter = DocumentGetter(document)
+
+        assert len(list(doc_getter.iter_components_of_type(doc_models.List))) == 3
+
+        list_1 = doc_getter.get_component_by_path('/sections/S1/S1.I1')
+
+        assert isinstance(list_1, doc_models.List)
+
+        assert not list_1.ordered
+        assert len(list_1.items) == 3
+
+        assert list_1.items[0].elements[0].startswith('Slow inference speed')
+        assert list_1.items[0].elements[-1].endswith('of hundreds or thousands.')
+        assert list_1.items[1].elements[0].startswith('Synthesized speech is')
+        assert list_1.items[1].elements[-1] == '.'
+        assert list_1.items[2].elements[0].startswith('Synthesized speech is lack')
+        assert list_1.items[2].elements[-1].endswith('prosody in the autoregressive generation.')

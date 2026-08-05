@@ -64,6 +64,20 @@ def sample_document():
                         expression='\\frac{1}{2}',
                         format='LaTeX',
                     ),
+                    doc_models.List(
+                        component_id='list_1',
+                        ordered=True,
+                        items=[
+                            doc_models.Paragraph(
+                                component_id='list_item_1',
+                                elements=['This is the first list item.'],
+                            ),
+                            doc_models.Paragraph(
+                                component_id='list_item_2',
+                                elements=['This is the second list item.'],
+                            ),
+                        ],
+                    ),
                 ],
             ),
         ],
@@ -121,6 +135,18 @@ def expected_paths(sample_document):
             '/footnotes/footnote_2/math_expr',
             sample_document.footnotes[1].components[0],
         ),
+        (
+            '/sections/section_2/list_1',
+            sample_document.sections[1].components[3],
+        ),
+        (
+            '/sections/section_2/list_1/list_item_1',
+            sample_document.sections[1].components[3].items[0],
+        ),
+        (
+            '/sections/section_2/list_1/list_item_2',
+            sample_document.sections[1].components[3].items[1],
+        ),
     )
 
 
@@ -142,7 +168,7 @@ class TestDocumentGetter:
         getter = DocumentGetter(sample_document)
 
         paragraphs = list(getter.iter_components_of_type(doc_models.Paragraph))
-        assert len(paragraphs) == 3
+        assert len(paragraphs) == 5
 
         figures = list(getter.iter_components_of_type(doc_models.Figure))
         assert len(figures) == 1
@@ -161,6 +187,9 @@ class TestDocumentGetter:
 
         sections = list(getter.iter_components_of_type(doc_models.Section))
         assert len(sections) == 3
+
+        lists = list(getter.iter_components_of_type(doc_models.List))
+        assert len(lists) == 1
 
     def test_get_component_by_path(self, sample_document, expected_paths):
         getter = DocumentGetter(sample_document)

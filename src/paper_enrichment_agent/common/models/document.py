@@ -114,6 +114,20 @@ class Paragraph(DocumentComponent):
     ]
 
 
+class List(DocumentComponent):
+    """Represents a list in a document.
+
+    A list is a component that represents an ordered or unordered collection of items. Each item
+    in the list can be a paragraph or another list, allowing for nested lists.
+    """
+
+    ordered: Annotated[
+        bool,
+        Field(description='Indicates whether the list is ordered (True) or unordered (False).'),
+    ]
+    items: Annotated[list[Paragraph], Field(description='List of items in the list.')]
+
+
 class Section(DocumentComponent):
     """Represents a section in a document.
 
@@ -122,7 +136,7 @@ class Section(DocumentComponent):
     structure within the document.
     """
 
-    type SectionComponent = Paragraph | Figure | Section | MathExpression
+    type SectionComponent = Paragraph | Figure | Section | MathExpression | List
 
     title: Annotated[str, Field(description='The title of the section.')]
     components: Annotated[
