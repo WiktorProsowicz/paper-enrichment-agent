@@ -5,6 +5,7 @@ requires-python=">=3.12"
 dependencies = [
     "beautifulsoup4>=4.15.0",
     "fastapi>=0.140.7",
+    "prometheus-client>=0.26.0",
     "pydantic>=2.13.4",
     "requests>=2.34.2",
 ]
