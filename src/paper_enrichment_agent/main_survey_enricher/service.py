@@ -5,20 +5,6 @@ component such as TUI or web interface. It orchestrates the operations that are 
 fulfill the designed use cases of the entire application.
 """
 
-from dataclasses import dataclass
-
-from prometheus_client import Counter
-
-
-@dataclass
-class Metrics:
-    """Metrics for the `main_survey_enricher` service."""
-
-    papers_added: Counter = Counter(
-        'main_survey_enricher_papers_added',
-        'Number of papers added to the system.',
-    )
-
 
 class MainSurveyEnricherService:
     """The main service of the `main_survey_enricher` component."""
