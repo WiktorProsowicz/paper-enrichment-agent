@@ -15,6 +15,13 @@ class Metrics:
             namespace='main_survey_enricher',
         )
 
+        self.papers_parsed = Counter(
+            'papers_parsed',
+            'Number of papers parsed by the system.',
+            labelnames=['source', 'status'],
+            namespace='main_survey_enricher',
+        )
+
         self.papers_removed = Counter(
             'papers_removed',
             'Number of papers removed from the system.',
@@ -35,6 +42,12 @@ class Metrics:
 
         self.paper_parsing_time = Summary(
             'paper_parsing_time',
-            'Time spent parsing papers by the system.',
+            'Time spent on successful parsing of papers by the system.',
+            namespace='main_survey_enricher',
+        )
+
+        self.doc_db_operations_time = Summary(
+            'doc_db_operations_time',
+            'Time spent on operations with the document database by the system.',
             namespace='main_survey_enricher',
         )
