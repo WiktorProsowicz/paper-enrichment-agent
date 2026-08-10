@@ -120,3 +120,11 @@ def setup_logging(
     }
 
     logging.config.dictConfig(logging_config)
+
+
+type LoggerType = structlog.stdlib.BoundLogger
+
+
+def get_logger(name: str) -> LoggerType:
+    """Returns a logger instance for the given name."""
+    return structlog.get_logger(name)  # type: ignore
