@@ -73,6 +73,12 @@ class ArxivParser:
 
         self._resolve_references(document)
 
+        # Fix the image sources to point to the ar5iv.labs.arxiv.org domain.
+        for image in document_getter.DocumentGetter(document).iter_components_of_type(
+            doc_models.ImgSubfigure
+        ):
+            image.image_src = f'https://ar5iv.labs.arxiv.org{image.image_src}'
+
         return document
 
     def _resolve_references(self, document: doc_models.Document) -> None:
@@ -82,6 +88,8 @@ class ArxivParser:
 
         for reference in doc_getter.iter_components_of_type(doc_models.Reference):
             if reference.ref_type == 'element':
+                # Both internal and external links are represented as .ltx_ref. Links that do not
+                # reference an element id have to be treated as external links.
                 if not reference.target.startswith('#'):
                     reference.ref_type = 'link'
                     reference.description = 'External link reference'
@@ -89,6 +97,7 @@ class ArxivParser:
 
                 component_id = reference.target[1:]
 
+                # Links to subfigures are folded into the parent figure
                 if re.match(r'.+\.sf\d+$', component_id) or re.match(r'.+\.st\d+$', component_id):
                     component_id = '.'.join(component_id.split('.')[:-1])
 
