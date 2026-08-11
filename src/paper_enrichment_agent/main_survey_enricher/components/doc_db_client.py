@@ -7,7 +7,7 @@ from collections.abc import Generator
 from typing import Any
 
 import requests
-from botocore.client import BaseClient as BotocoreBaseClient
+from mypy_boto3_s3 import S3Client
 
 from paper_enrichment_agent.common.document_getter import DocumentGetter
 from paper_enrichment_agent.common.models import document as doc_models
@@ -20,9 +20,9 @@ class DocDBClient:
     class DocDBClientError(Exception):
         """Base class for exceptions raised by the `DocDBClient`."""
 
-    def __init__(self, boto_client: BotocoreBaseClient) -> None:
+    def __init__(self, s3_client: S3Client) -> None:
 
-        self._boto_client = boto_client
+        self._s3_client = s3_client
         self._s3_bucket = 'document_database'
 
     def add_survey(self, document: doc_models.Document, name: str, description: str) -> None:
@@ -58,7 +58,7 @@ class DocDBClient:
                 with requests.get(image.image_src, stream=True) as response:
                     response.raise_for_status()
 
-                    self._boto_client.upload_fileobj(
+                    self._s3_client.upload_fileobj(
                         response.raw,
                         Bucket=self._s3_bucket,
                         Key=image_db_path,
@@ -92,11 +92,11 @@ class DocDBClient:
         """
 
         try:
-            json_file = self._boto_client.get_object(Bucket=self._s3_bucket, Key=path)
+            json_file = self._s3_client.get_object(Bucket=self._s3_bucket, Key=path)
 
-        except self._boto_client.exceptions.ClientError as e:
+        except self._s3_client.exceptions.ClientError as e:
             if e.response['Error']['Code'] == 'NoSuchKey' and create_if_not_exists:
-                self._boto_client.put_object(
+                self._s3_client.put_object(
                     Bucket=self._s3_bucket, Key=path, Body=json.dumps({}).encode('utf-8')
                 )
 
@@ -106,7 +106,7 @@ class DocDBClient:
                 ) from e
 
         finally:
-            json_file = self._boto_client.get_object(Bucket=self._s3_bucket, Key=path)
+            json_file = self._s3_client.get_object(Bucket=self._s3_bucket, Key=path)
 
         try:
             json_content = json.loads(json_file['Body'].read().decode('utf-8'))
@@ -118,6 +118,6 @@ class DocDBClient:
 
         yield json_content
 
-        self._boto_client.put_object(
+        self._s3_client.put_object(
             Bucket=self._s3_bucket, Key=path, Body=json.dumps(json_content).encode('utf-8')
         )
