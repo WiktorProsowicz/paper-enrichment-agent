@@ -40,6 +40,31 @@ class DocDBClient:
 
         self._upload_model_to_db(document, path=f'documents/{doc_metadata.paper_id}/document.json')
 
+    def get_available_surveys(self) -> list[SurveyMetadata]:
+        """Returns a list of all available surveys in the document database."""
+
+        try:
+            response = self._s3_client.list_objects_v2(
+                Bucket=self._s3_bucket, Prefix='surveys/', Delimiter='/'
+            )
+
+            prefixes = response['CommonPrefixes']
+
+        except (BotocoreClientError, KeyError) as e:
+            raise self.DocDBClientError(f'Failed to list surveys in database: {e}') from e
+
+        survey_metadata_list = []
+
+        for prefix in prefixes:
+            survey_prefix = prefix['Prefix']
+            metadata_path = f'{survey_prefix}metadata.json'
+
+            survey_metadata_list.append(
+                self._get_model_from_db(path=metadata_path, model_type=SurveyMetadata)
+            )
+
+        return survey_metadata_list
+
     def _download_and_store_images(
         self, document: doc_models.Document, doc_metadata: DocumentMetadata
     ) -> None:
@@ -92,6 +117,15 @@ class DocDBClient:
         database.
         """
 
+        model = self._get_model_from_db(path=path, model_type=model_type)
+
+        yield model
+
+        self._upload_model_to_db(model=model, path=path)
+
+    def _get_model_from_db[T: pydantic.BaseModel](self, path: str, model_type: type[T]) -> T:
+        """Retrieves a Pydantic model from the database at the specified path."""
+
         try:
             json_file = self._s3_client.get_object(Bucket=self._s3_bucket, Key=path)
 
@@ -108,17 +142,7 @@ class DocDBClient:
                 f'Failed to decode JSON from database at {path}: {e}'
             ) from e
 
-        yield model
-
-        try:
-            self._s3_client.put_object(
-                Bucket=self._s3_bucket,
-                Key=path,
-                Body=model.model_dump_json().encode('utf-8'),
-            )
-
-        except BotocoreClientError as e:
-            raise self.DocDBClientError(f'Failed to update JSON in database at {path}: {e}') from e
+        return model
 
     def _upload_model_to_db(self, model: pydantic.BaseModel, path: str) -> None:
         """Uploads a Pydantic model to the database at the specified path."""

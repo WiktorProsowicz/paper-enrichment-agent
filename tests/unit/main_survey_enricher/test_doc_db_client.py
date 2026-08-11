@@ -9,6 +9,7 @@ from unittest.mock import Mock, MagicMock
 
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.main_survey_enricher.components.doc_db_client import DocDBClient
+from paper_enrichment_agent.common.models.misc import DocumentMetadata, SurveyMetadata
 
 
 @pytest.fixture
@@ -43,6 +44,33 @@ def sample_document() -> doc_models.Document:
         footnotes=[],
         referenced_papers=[],
     )
+
+
+@pytest.fixture
+def sample_survey_metadatas() -> list[SurveyMetadata]:
+
+    return [
+        SurveyMetadata(
+            doc_metadata=DocumentMetadata(
+                name='Sample Survey 1',
+                description='This is a sample survey description 1.',
+                images={
+                    '/sections/sec1/fig1/subfig1': 'surveys/sample_paper_id_1/images/image1.png'
+                },
+            ),
+            referenced_docs={},
+        ),
+        SurveyMetadata(
+            doc_metadata=DocumentMetadata(
+                name='Sample Survey 2',
+                description='This is a sample survey description 2.',
+                images={
+                    '/sections/sec2/fig1/subfig1': 'surveys/sample_paper_id_2/images/image2.png'
+                },
+            ),
+            referenced_docs={},
+        ),
+    ]
 
 
 @pytest.fixture
@@ -168,3 +196,59 @@ class TestDocDBClient:
 
         assert len(stored_documents) == 1
         assert stored_documents[0] == sample_document.model_dump()
+
+    def test_get_available_surveys_returns_empty_list(self):
+
+        mock_s3_client = MagicMock()
+        mock_s3_client.list_objects_v2.return_value = {'CommonPrefixes': []}
+
+        doc_db_client = DocDBClient(s3_client=mock_s3_client)
+
+        assert doc_db_client.get_available_surveys() == []
+        assert mock_s3_client.get_object.call_count == 0
+
+    def test_get_available_surveys_returns_surveys(self, sample_survey_metadatas):
+
+        def mock_list_objects_v2(**kwargs):
+            yield {
+                'CommonPrefixes': [
+                    {'Prefix': 'surveys/sample_paper_id/'},
+                    {'Prefix': 'surveys/another_paper_id/'},
+                ]
+            }
+
+        def mock_get_object(**kwargs):
+
+            yield {
+                'Body': io.BytesIO(
+                    json.dumps(sample_survey_metadatas[0].model_dump()).encode('utf-8')
+                )
+            }
+
+            yield {
+                'Body': io.BytesIO(
+                    json.dumps(sample_survey_metadatas[1].model_dump()).encode('utf-8')
+                )
+            }
+
+        mock_s3_client = MagicMock()
+        mock_s3_client.list_objects_v2.side_effect = mock_list_objects_v2()
+        mock_s3_client.get_object.side_effect = mock_get_object()
+
+        doc_db_client = DocDBClient(s3_client=mock_s3_client)
+
+        assert len(doc_db_client.get_available_surveys()) == 2
+
+    def test_get_available_surveys_raises_on_list_failure(self):
+
+        mock_s3_client = MagicMock()
+        mock_s3_client.list_objects_v2.side_effect = BotocoreClientError(
+            {'Error': {'Code': 'AccessDenied'}}, 'ListObjectsV2'
+        )
+
+        doc_db_client = DocDBClient(s3_client=mock_s3_client)
+
+        with pytest.raises(
+            DocDBClient.DocDBClientError, match='Failed to list surveys in database'
+        ):
+            doc_db_client.get_available_surveys()
