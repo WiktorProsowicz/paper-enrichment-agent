@@ -7,6 +7,7 @@ from collections.abc import Generator
 from typing import Any
 
 import requests
+from botocore.exceptions import ClientError as BotocoreClientError
 from mypy_boto3_s3 import S3Client
 
 from paper_enrichment_agent.common.document_getter import DocumentGetter
@@ -94,7 +95,7 @@ class DocDBClient:
         try:
             json_file = self._s3_client.get_object(Bucket=self._s3_bucket, Key=path)
 
-        except self._s3_client.exceptions.ClientError as e:
+        except BotocoreClientError as e:
             if e.response['Error']['Code'] == 'NoSuchKey' and create_if_not_exists:
                 self._s3_client.put_object(
                     Bucket=self._s3_bucket, Key=path, Body=json.dumps({}).encode('utf-8')
@@ -118,6 +119,10 @@ class DocDBClient:
 
         yield json_content
 
-        self._s3_client.put_object(
-            Bucket=self._s3_bucket, Key=path, Body=json.dumps(json_content).encode('utf-8')
-        )
+        try:
+            self._s3_client.put_object(
+                Bucket=self._s3_bucket, Key=path, Body=json.dumps(json_content).encode('utf-8')
+            )
+
+        except BotocoreClientError as e:
+            raise self.DocDBClientError(f'Failed to update JSON in database at {path}: {e}') from e
