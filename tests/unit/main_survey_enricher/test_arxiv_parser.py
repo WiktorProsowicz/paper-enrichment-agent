@@ -145,9 +145,15 @@ class TestArxivParser:
         first_figure_subfigures = all_figures[0].subfigures
 
         assert len(first_figure_subfigures) == 4
-        assert first_figure_subfigures[0].image_src == '/html/1905.09263/assets/x1.png'
+        assert (
+            first_figure_subfigures[0].image_src
+            == 'https://ar5iv.labs.arxiv.org/html/1905.09263/assets/x1.png'
+        )
         assert first_figure_subfigures[0].caption == '(a) Feed-Forward Transformer'
-        assert first_figure_subfigures[3].image_src == '/html/1905.09263/assets/x4.png'
+        assert (
+            first_figure_subfigures[3].image_src
+            == 'https://ar5iv.labs.arxiv.org/html/1905.09263/assets/x4.png'
+        )
         assert first_figure_subfigures[3].caption == '(d) Duration Predictor'
 
     def test_parses_correct_equations(self, mock_example_paper):
