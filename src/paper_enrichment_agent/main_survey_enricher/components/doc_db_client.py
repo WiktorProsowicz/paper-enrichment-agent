@@ -4,8 +4,8 @@ import contextlib
 import json
 import uuid
 from collections.abc import Generator
-from typing import Any
 
+import pydantic
 import requests
 from botocore.exceptions import ClientError as BotocoreClientError
 from mypy_boto3_s3 import S3Client
@@ -34,11 +34,11 @@ class DocDBClient:
         self._download_and_store_images(document=document, doc_metadata=doc_metadata)
 
         survey_metadata = SurveyMetadata(doc_metadata=doc_metadata, referenced_docs={})
+        self._upload_model_to_db(
+            survey_metadata, path=f'surveys/{doc_metadata.paper_id}/metadata.json'
+        )
 
-        with self._get_db_json_reference(
-            f'documents/{doc_metadata.paper_id}/metadata.json', create_if_not_exists=True
-        ) as metadata_json:
-            metadata_json.update(survey_metadata.model_dump())
+        self._upload_model_to_db(document, path=f'documents/{doc_metadata.paper_id}/document.json')
 
     def _download_and_store_images(
         self, document: doc_models.Document, doc_metadata: DocumentMetadata
@@ -83,12 +83,12 @@ class DocDBClient:
             doc_metadata.images[doc_getter.get_path_of_component(image)] = image_db_path
 
     @contextlib.contextmanager
-    def _get_db_json_reference(
-        self, path: str, create_if_not_exists: bool = False
-    ) -> Generator[dict[str, Any], None, None]:
-        """Returns a context manager that yields a JSON reference to a document in the database.
+    def _get_model_reference[T: pydantic.BaseModel](
+        self, path: str, model_type: type[T]
+    ) -> Generator[T, None, None]:
+        """Returns a context manager that yields a Pydantic model reference from the database.
 
-        The context manager ensures that the JSON reference is properly synchronized with the
+        The context manager ensures that the reference is properly synchronized with the
         database.
         """
 
@@ -96,33 +96,39 @@ class DocDBClient:
             json_file = self._s3_client.get_object(Bucket=self._s3_bucket, Key=path)
 
         except BotocoreClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey' and create_if_not_exists:
-                self._s3_client.put_object(
-                    Bucket=self._s3_bucket, Key=path, Body=json.dumps({}).encode('utf-8')
-                )
-
-            else:
-                raise self.DocDBClientError(
-                    f'Failed to retrieve JSON from database at {path}: {e}'
-                ) from e
-
-        finally:
-            json_file = self._s3_client.get_object(Bucket=self._s3_bucket, Key=path)
+            raise self.DocDBClientError(
+                f'Failed to retrieve JSON from database at {path}: {e}'
+            ) from e
 
         try:
-            json_content = json.loads(json_file['Body'].read().decode('utf-8'))
+            model = model_type.model_validate_json(json_file['Body'].read().decode('utf-8'))
 
-        except json.JSONDecodeError as e:
+        except pydantic.ValidationError as e:
             raise self.DocDBClientError(
                 f'Failed to decode JSON from database at {path}: {e}'
             ) from e
 
-        yield json_content
+        yield model
 
         try:
             self._s3_client.put_object(
-                Bucket=self._s3_bucket, Key=path, Body=json.dumps(json_content).encode('utf-8')
+                Bucket=self._s3_bucket,
+                Key=path,
+                Body=model.model_dump_json().encode('utf-8'),
             )
 
         except BotocoreClientError as e:
             raise self.DocDBClientError(f'Failed to update JSON in database at {path}: {e}') from e
+
+    def _upload_model_to_db(self, model: pydantic.BaseModel, path: str) -> None:
+        """Uploads a Pydantic model to the database at the specified path."""
+
+        try:
+            self._s3_client.put_object(
+                Bucket=self._s3_bucket,
+                Key=path,
+                Body=json.dumps(model.model_dump()).encode('utf-8'),
+            )
+
+        except BotocoreClientError as e:
+            raise self.DocDBClientError(f'Failed to upload model to database at {path}: {e}') from e
