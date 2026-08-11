@@ -2,9 +2,12 @@ import sys
 import subprocess
 import json
 import textwrap
+import pathlib
 
 import pytest
-import pathlib
+import pydantic
+
+from paper_enrichment_agent.common import logging_setup
 
 
 def run_logging(script_content: str, log_file_path: pathlib.Path) -> dict:
@@ -154,3 +157,17 @@ class TestLoggingSetup:
             log['level'] not in ('debug', 'info')
             for log in logging_with_other_module['file_log_objects']
         )
+
+    def test_not_fails_when_called_in_test_code(self, tmp_path) -> None:
+
+        class TestModel(pydantic.BaseModel):
+            field: str
+
+        logging_setup.setup_logging(tmp_path / 'test_log.jsonl')
+        logger = logging_setup.get_logger('paper_enrichment_agent.test')
+
+        logger.info('Test log message', extra_info='extra_value')
+        logger.error('Test error code: %s', 123)
+        logger.warning('Test warning message')
+        logger.debug('Test debug message', pydantic_obj=TestModel(field='test_value'))
+        logger.critical('Test critical message')
