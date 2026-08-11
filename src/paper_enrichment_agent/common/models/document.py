@@ -16,8 +16,9 @@ class DocumentComponent(pydantic.BaseModel):
     component.
     """
 
-    component_id: Annotated[str, Field(description='Identifier of the component.')] = (
-        uuid.uuid4().hex
+    component_id: str = Field(
+        default_factory=lambda: uuid.uuid4().hex,
+        description='Identifier of the component.',
     )
 
     description: Annotated[

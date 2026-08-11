@@ -13,9 +13,11 @@ class DocumentMetadata(pydantic.BaseModel):
     The `document` may be either a survey or a referenced paper.
     """
 
-    paper_id: Annotated[str, Field(description='The unique identifier of the document.')] = (
-        uuid.uuid4().hex
+    paper_id: str = Field(
+        default_factory=lambda: uuid.uuid4().hex,
+        description='The unique identifier of the document.',
     )
+
     name: Annotated[str, Field(description='The name of the document.')]
     description: Annotated[str, Field(description='The description of the document.')]
     images: Annotated[
