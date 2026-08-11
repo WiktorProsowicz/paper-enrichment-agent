@@ -196,6 +196,7 @@ class TestDocDBClient:
 
         assert len(stored_documents) == 1
         assert stored_documents[0] == sample_document.model_dump()
+        assert len(survey_meta.doc_metadata.images) == 2
 
     def test_get_available_surveys_returns_empty_list(self):
 

@@ -26,7 +26,9 @@ class DocDBClient:
         self._s3_client = s3_client
         self._s3_bucket = 'document_database'
 
-    def add_survey(self, document: doc_models.Document, name: str, description: str) -> None:
+    def add_survey(
+        self, document: doc_models.Document, name: str, description: str
+    ) -> SurveyMetadata:
         """Adds a survey to the document database."""
 
         doc_metadata = DocumentMetadata(name=name, description=description, images={})
@@ -39,6 +41,8 @@ class DocDBClient:
         )
 
         self._upload_model_to_db(document, path=f'documents/{doc_metadata.paper_id}/document.json')
+
+        return survey_metadata
 
     def get_available_surveys(self) -> list[SurveyMetadata]:
         """Returns a list of all available surveys in the document database."""
