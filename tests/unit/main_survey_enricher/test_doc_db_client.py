@@ -132,9 +132,7 @@ class TestDocDBClient:
         assert mock_s3_client.upload_fileobj.call_count == 2
         assert len(doc_meta.images) == 2
 
-        uploaded_paths = [
-            call.kwargs['Key'] for call in mock_s3_client.put_object.call_args_list
-        ]
+        uploaded_paths = [call.kwargs['Key'] for call in mock_s3_client.put_object.call_args_list]
         assert uploaded_paths == [
             f'documents/{doc_meta.paper_id}/metadata.json',
             f'documents/{doc_meta.paper_id}/document.json',
@@ -167,9 +165,7 @@ class TestDocDBClient:
 
         doc_db_client = DocDBClient(s3_client=mock_s3_client)
 
-        with pytest.raises(
-            DocDBClient.DocDBClientError, match='There is no document with the id'
-        ):
+        with pytest.raises(DocDBClient.DocDBClientError, match='There is no document with the id'):
             doc_db_client.register_as_survey(paper_id='sample_paper_id')
 
         assert mock_s3_client.put_object.call_count == 0
@@ -245,3 +241,32 @@ class TestDocDBClient:
             DocDBClient.DocDBClientError, match='Failed to list surveys in database'
         ):
             doc_db_client.get_available_surveys()
+
+    def test_add_referenced_document_raises_on_nonexistent_survey(self):
+
+        def mock_head_object(**kwargs):
+            yield BotocoreClientError({'Error': {'Code': '404'}}, 'HeadObject')
+
+        mock_s3_client = MagicMock()
+        mock_s3_client.head_object.side_effect = mock_head_object()
+
+        doc_db_client = DocDBClient(s3_client=mock_s3_client)
+
+        with pytest.raises(DocDBClient.DocDBClientError, match='There is no survey with the id'):
+            doc_db_client.add_referenced_document('survey_id', 'ref_id')
+
+    def test_add_referenced_document_raises_on_nonexistent_ref(self):
+
+        def mock_head_object(**kwargs):
+            yield None
+            yield BotocoreClientError({'Error': {'Code': '404'}}, 'HeadObject')
+
+        mock_s3_client = MagicMock()
+        mock_s3_client.head_object.side_effect = mock_head_object()
+
+        doc_db_client = DocDBClient(s3_client=mock_s3_client)
+
+        with pytest.raises(
+            DocDBClient.DocDBClientError, match='There is no referenced document with the id'
+        ):
+            doc_db_client.add_referenced_document('survey_id', 'ref_id')
