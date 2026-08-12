@@ -58,7 +58,10 @@ class MainSurveyEnricherService:
             self._metrics.paper_parsing_time.observe(end - start)
 
             start = time.perf_counter()
-            self._db_client.add_survey(document=document, name=name, description=description)
+            doc_metadata = self._db_client.add_document(
+                document=document, name=name, description=description
+            )
+            self._db_client.register_as_survey(paper_id=doc_metadata.paper_id)
             end = time.perf_counter()
 
             _logger().info(

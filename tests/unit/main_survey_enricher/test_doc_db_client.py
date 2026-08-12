@@ -9,7 +9,7 @@ from unittest.mock import Mock, MagicMock
 
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.main_survey_enricher.components.doc_db_client import DocDBClient
-from paper_enrichment_agent.common.models.misc import DocumentMetadata, SurveyMetadata
+from paper_enrichment_agent.common.models.misc import SurveyMetadata
 
 
 @pytest.fixture
@@ -50,26 +50,8 @@ def sample_document() -> doc_models.Document:
 def sample_survey_metadatas() -> list[SurveyMetadata]:
 
     return [
-        SurveyMetadata(
-            doc_metadata=DocumentMetadata(
-                name='Sample Survey 1',
-                description='This is a sample survey description 1.',
-                images={
-                    '/sections/sec1/fig1/subfig1': 'surveys/sample_paper_id_1/images/image1.png'
-                },
-            ),
-            referenced_docs={},
-        ),
-        SurveyMetadata(
-            doc_metadata=DocumentMetadata(
-                name='Sample Survey 2',
-                description='This is a sample survey description 2.',
-                images={
-                    '/sections/sec2/fig1/subfig1': 'surveys/sample_paper_id_2/images/image2.png'
-                },
-            ),
-            referenced_docs={},
-        ),
+        SurveyMetadata(paper_id='sample_paper_id_1', referenced_docs={}),
+        SurveyMetadata(paper_id='sample_paper_id_2', referenced_docs={}),
     ]
 
 
@@ -108,7 +90,7 @@ def patch_get_request_fails(monkeypatch):
 
 
 class TestDocDBClient:
-    def test_add_survey_raises_when_download_request_fails(
+    def test_add_document_raises_when_download_request_fails(
         self, sample_document, patch_get_request_fails
     ):
 
@@ -116,13 +98,13 @@ class TestDocDBClient:
         doc_db_client = DocDBClient(s3_client=mock_s3_client)
 
         with pytest.raises(DocDBClient.DocDBClientError, match='Failed to download image from'):
-            doc_db_client.add_survey(
-                document=sample_document, name='Sample Survey', description='Sample Description'
+            doc_db_client.add_document(
+                document=sample_document, name='Sample Document', description='Sample Description'
             )
 
         assert mock_s3_client.upload_fileobj.call_count == 0
 
-    def test_add_survey_raises_when_upload_fails(self, sample_document, patch_get_request):
+    def test_add_document_raises_when_upload_fails(self, sample_document, patch_get_request):
 
         mock_s3_client = MagicMock()
         mock_s3_client.upload_fileobj.side_effect = [None, Exception('Upload failed')]
@@ -132,24 +114,81 @@ class TestDocDBClient:
         with pytest.raises(
             DocDBClient.DocDBClientError, match='Failed to upload image to database'
         ):
-            doc_db_client.add_survey(
-                document=sample_document, name='Sample Survey', description='Sample Description'
+            doc_db_client.add_document(
+                document=sample_document, name='Sample Document', description='Sample Description'
             )
 
         assert mock_s3_client.upload_fileobj.call_count == 2
 
-    def test_add_survey_successful(self, sample_document, patch_get_request):
+    def test_add_document_successful(self, sample_document, patch_get_request):
 
         mock_s3_client = MagicMock()
 
         doc_db_client = DocDBClient(s3_client=mock_s3_client)
-        survey_meta = doc_db_client.add_survey(
-            document=sample_document, name='Sample Survey', description='Sample Description'
+        doc_meta = doc_db_client.add_document(
+            document=sample_document, name='Sample Document', description='Sample Description'
         )
 
         assert mock_s3_client.upload_fileobj.call_count == 2
-        assert mock_s3_client.put_object.call_count == 2
-        assert len(survey_meta.doc_metadata.images) == 2
+        assert len(doc_meta.images) == 2
+
+        uploaded_paths = [
+            call.kwargs['Key'] for call in mock_s3_client.put_object.call_args_list
+        ]
+        assert uploaded_paths == [
+            f'documents/{doc_meta.paper_id}/metadata.json',
+            f'documents/{doc_meta.paper_id}/document.json',
+        ]
+
+    def test_register_as_survey_successful(self):
+
+        mock_s3_client = MagicMock()
+
+        doc_db_client = DocDBClient(s3_client=mock_s3_client)
+        survey_meta = doc_db_client.register_as_survey(paper_id='sample_paper_id')
+
+        assert survey_meta.paper_id == 'sample_paper_id'
+        assert survey_meta.referenced_docs == {}
+
+        mock_s3_client.head_object.assert_called_once_with(
+            Bucket='document_database', Key='documents/sample_paper_id/metadata.json'
+        )
+        assert (
+            mock_s3_client.put_object.call_args.kwargs['Key']
+            == 'surveys/sample_paper_id/metadata.json'
+        )
+
+    def test_register_as_survey_raises_when_document_is_missing(self):
+
+        mock_s3_client = MagicMock()
+        mock_s3_client.head_object.side_effect = BotocoreClientError(
+            {'Error': {'Code': '404'}}, 'HeadObject'
+        )
+
+        doc_db_client = DocDBClient(s3_client=mock_s3_client)
+
+        with pytest.raises(
+            DocDBClient.DocDBClientError, match='There is no document with the id'
+        ):
+            doc_db_client.register_as_survey(paper_id='sample_paper_id')
+
+        assert mock_s3_client.put_object.call_count == 0
+
+    def test_register_as_survey_raises_when_presence_check_fails(self):
+
+        mock_s3_client = MagicMock()
+        mock_s3_client.head_object.side_effect = BotocoreClientError(
+            {'Error': {'Code': 'AccessDenied'}}, 'HeadObject'
+        )
+
+        doc_db_client = DocDBClient(s3_client=mock_s3_client)
+
+        with pytest.raises(
+            DocDBClient.DocDBClientError, match='Failed to check the presence of the document'
+        ):
+            doc_db_client.register_as_survey(paper_id='sample_paper_id')
+
+        assert mock_s3_client.put_object.call_count == 0
 
     def test_get_available_surveys_returns_empty_list(self):
 

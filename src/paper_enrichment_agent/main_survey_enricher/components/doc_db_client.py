@@ -26,26 +26,65 @@ class DocDBClient:
         self._s3_client = s3_client
         self._s3_bucket = 'document_database'
 
-    def add_survey(
+    def add_document(
         self, document: doc_models.Document, name: str, description: str
-    ) -> SurveyMetadata:
-        """Adds a survey to the document database."""
+    ) -> DocumentMetadata:
+        """Adds a document together with its metadata to the document database.
+
+        Args:
+            document: The document to be added to the database.
+            name: The name of the document.
+            description: The description of the document.
+
+        Returns:
+            The metadata of the freshly added document.
+
+        Raises:
+            DocDBClientError: If there is an error while adding the document to the database.
+        """
 
         doc_metadata = DocumentMetadata(name=name, description=description, images={})
 
         self._download_and_store_images(document=document, doc_metadata=doc_metadata)
 
-        survey_metadata = SurveyMetadata(doc_metadata=doc_metadata, referenced_docs={})
         self._upload_model_to_db(
-            survey_metadata, path=f'surveys/{doc_metadata.paper_id}/metadata.json'
+            doc_metadata, path=f'documents/{doc_metadata.paper_id}/metadata.json'
         )
-
         self._upload_model_to_db(document, path=f'documents/{doc_metadata.paper_id}/document.json')
+
+        return doc_metadata
+
+    def register_as_survey(self, paper_id: str) -> SurveyMetadata:
+        """Marks the document with the given id as a survey.
+
+        Args:
+            paper_id: The identifier of an already added document.
+
+        Returns:
+            The metadata of the freshly created survey.
+
+        Raises:
+            DocDBClientError: If there is no document with the given id in the database.
+        """
+
+        if not self._document_exists(paper_id):
+            raise self.DocDBClientError(f'There is no document with the id {paper_id} in database.')
+
+        survey_metadata = SurveyMetadata(paper_id=paper_id, referenced_docs={})
+
+        self._upload_model_to_db(survey_metadata, path=f'surveys/{paper_id}/metadata.json')
 
         return survey_metadata
 
     def get_available_surveys(self) -> list[SurveyMetadata]:
-        """Returns a list of all available surveys in the document database."""
+        """Returns a list of all available surveys in the document database.
+
+        Returns:
+            A list of `SurveyMetadata` objects representing the available surveys.
+
+        Raises:
+            DocDBClientError: If there is an error while retrieving the surveys from the database.
+        """
 
         try:
             response = self._s3_client.list_objects_v2(
@@ -68,6 +107,24 @@ class DocDBClient:
             )
 
         return survey_metadata_list
+
+    def _document_exists(self, paper_id: str) -> bool:
+        """Tells whether a document with the given id is present in the database."""
+
+        try:
+            self._s3_client.head_object(
+                Bucket=self._s3_bucket, Key=f'documents/{paper_id}/metadata.json'
+            )
+
+        except BotocoreClientError as e:
+            if e.response.get('Error', {}).get('Code') in ('404', 'NoSuchKey'):
+                return False
+
+            raise self.DocDBClientError(
+                f'Failed to check the presence of the document {paper_id} in database: {e}'
+            ) from e
+
+        return True
 
     def _download_and_store_images(
         self, document: doc_models.Document, doc_metadata: DocumentMetadata

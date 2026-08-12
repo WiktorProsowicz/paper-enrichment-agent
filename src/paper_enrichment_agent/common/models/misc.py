@@ -15,7 +15,7 @@ class DocumentMetadata(pydantic.BaseModel):
 
     paper_id: str = Field(
         default_factory=lambda: uuid.uuid4().hex,
-        description='The unique identifier of the document.',
+        description='The unique identifier of the document in the database.',
     )
 
     name: Annotated[str, Field(description='The name of the document.')]
@@ -32,9 +32,10 @@ class DocumentMetadata(pydantic.BaseModel):
 class SurveyMetadata(pydantic.BaseModel):
     """Represents the metadata of a survey being in the system."""
 
-    doc_metadata: Annotated[
-        DocumentMetadata, Field(description='The metadata of the survey document.')
-    ]
+    paper_id: str = Field(
+        default_factory=lambda: uuid.uuid4().hex,
+        description='The identifier of the survey paper in the database.',
+    )
     referenced_docs: Annotated[
         dict[str, str],
         Field(
