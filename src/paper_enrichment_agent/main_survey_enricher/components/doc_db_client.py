@@ -140,6 +140,62 @@ class DocDBClient:
         ) as survey:
             survey.referenced_docs[reference_id] = referenced_paper_id
 
+    def delete_survey(self, survey_id: str) -> None:
+        """Deletes a survey and its referenced documents from the database.
+
+        Args:
+            survey_id: The identifier of the survey to be deleted.
+
+        Raises:
+            DocDBClientError: If there is no survey with the given id in the database.
+            DocDBClientError: If there is an error while deleting the survey from the database.
+        """
+
+        if not self._document_exists(survey_id):
+            raise self.DocDBClientError(f'There is no survey with the id {survey_id} in database.')
+
+        try:
+            metadata = self._get_model_from_db(
+                path=f'surveys/{survey_id}/metadata.json', model_type=SurveyMetadata
+            )
+
+            for referenced_doc_id in metadata.referenced_docs.values():
+                self._delete_document(paper_id=referenced_doc_id)
+
+            self._s3_client.delete_object(
+                Bucket=self._s3_bucket, Key=f'surveys/{survey_id}/metadata.json'
+            )
+
+            self._delete_document(paper_id=survey_id)
+
+        except BotocoreClientError as e:
+            raise self.DocDBClientError(
+                f'Failed to delete survey {survey_id} from database: {e}'
+            ) from e
+
+    def _delete_document(self, paper_id: str) -> None:
+        """Deletes a document and its images from the database."""
+
+        try:
+            self._s3_client.delete_object(
+                Bucket=self._s3_bucket, Key=f'documents/{paper_id}/metadata.json'
+            )
+
+            self._s3_client.delete_object(
+                Bucket=self._s3_bucket, Key=f'documents/{paper_id}/document.json'
+            )
+
+            list_images_response = self._s3_client.list_objects_v2(
+                Bucket=self._s3_bucket, Prefix=f'documents/{paper_id}/images/'
+            )
+            for obj in list_images_response.get('Contents', []):
+                self._s3_client.delete_object(Bucket=self._s3_bucket, Key=obj['Key'])
+
+        except BotocoreClientError as e:
+            raise self.DocDBClientError(
+                f'Failed to delete document {paper_id} from database: {e}'
+            ) from e
+
     def _document_exists(self, paper_id: str) -> bool:
         """Tells whether a document with the given id is present in the database."""
 

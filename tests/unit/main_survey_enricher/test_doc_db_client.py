@@ -314,3 +314,59 @@ class TestDocDBClient:
                 ).model_dump()
             ).encode('utf-8'),
         )
+
+    def test_delete_survey_raises_on_nonexistent_survey(self):
+
+        def mock_head_object(**kwargs):
+            yield BotocoreClientError({'Error': {'Code': '404'}}, 'HeadObject')
+
+        mock_s3_client = MagicMock()
+        mock_s3_client.head_object.side_effect = mock_head_object()
+
+        doc_db_client = DocDBClient(s3_client=mock_s3_client)
+
+        with pytest.raises(DocDBClient.DocDBClientError, match='There is no survey with the id'):
+            doc_db_client.delete_survey('survey_id')
+
+    def test_delete_survey_successful(self):
+
+        def mock_get_object(**kwargs):
+            yield {
+                'Body': io.BytesIO(
+                    json.dumps(
+                        SurveyMetadata(
+                            paper_id='survey_id', referenced_docs={'ref1': 'ref_id'}
+                        ).model_dump()
+                    ).encode('utf-8')
+                )
+            }
+
+        def mock_list_objects_v2(**kwargs):
+            yield {
+                'Contents': [
+                    {'Key': 'documents/ref_id/images/image1.png'},
+                    {'Key': 'documents/ref_id/images/image2.png'},
+                ]
+            }
+
+            yield {'Contents': [{'Key': 'documents/survey_id/images/image3.png'}]}
+
+        mock_s3_client = MagicMock()
+        mock_s3_client.get_object.side_effect = mock_get_object()
+        mock_s3_client.list_objects_v2.side_effect = mock_list_objects_v2()
+
+        doc_db_client = DocDBClient(s3_client=mock_s3_client)
+
+        doc_db_client.delete_survey('survey_id')
+
+        deleted_keys = [call.kwargs['Key'] for call in mock_s3_client.delete_object.call_args_list]
+        assert deleted_keys == [
+            'documents/ref_id/metadata.json',
+            'documents/ref_id/document.json',
+            'documents/ref_id/images/image1.png',
+            'documents/ref_id/images/image2.png',
+            'surveys/survey_id/metadata.json',
+            'documents/survey_id/metadata.json',
+            'documents/survey_id/document.json',
+            'documents/survey_id/images/image3.png',
+        ]
