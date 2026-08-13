@@ -323,3 +323,28 @@ class TestDocDBClient:
             'documents/survey_id/document.json',
             'documents/survey_id/images/image3.png',
         ]
+
+    def test_get_document_struct_ref_synchronizes_properly(self, sample_document):
+
+        def mock_get_object(**kwargs):
+
+            yield {'Body': io.BytesIO(json.dumps(sample_document.model_dump()).encode('utf-8'))}
+
+        mock_s3_client = MagicMock()
+        mock_s3_client.get_object.side_effect = mock_get_object()
+
+        doc_db_client = DocDBClient(s3_client=mock_s3_client)
+
+        with doc_db_client.get_document_struct_ref('sample_paper_id') as doc_struct_ref:
+            doc_struct_ref.sections.clear()
+
+        assert (
+            mock_s3_client.put_object.call_args_list[0].kwargs['Key']
+            == 'documents/sample_paper_id/document.json'
+        )
+        assert (
+            json.loads(mock_s3_client.put_object.call_args_list[0].kwargs['Body'].decode('utf-8'))[
+                'sections'
+            ]
+            == []
+        )

@@ -193,6 +193,20 @@ class DocDBClient:
                 f'Failed to delete survey {survey_id} from database: {e}'
             ) from e
 
+    @contextlib.contextmanager
+    def get_document_struct_ref(self, paper_id: str) -> Generator[doc_models.Document, None, None]:
+        """Returns a context manager that yields a reference to a document structure from the
+        database.
+
+        The context manager ensures that the reference is properly synchronized with the
+        database.
+        """
+
+        with self._get_model_reference(
+            path=f'documents/{paper_id}/document.json', model_type=doc_models.Document
+        ) as document:
+            yield document
+
     def _delete_document(self, paper_id: str) -> None:
         """Deletes a document and its images from the database."""
 
