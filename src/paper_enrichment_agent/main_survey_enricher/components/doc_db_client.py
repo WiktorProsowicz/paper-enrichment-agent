@@ -26,6 +26,34 @@ class DocDBClient:
         self._s3_client = s3_client
         self._s3_bucket = 'document_database'
 
+    def document_exists(self, paper_id: str) -> bool:
+        """Tells whether a document with the given id is present in the database.
+
+        Args:
+            paper_id: The identifier of the document to be looked up.
+
+        Returns:
+            True if the document is present in the database, False otherwise.
+
+        Raises:
+            DocDBClientError: If there is an error while checking the presence of the document.
+        """
+
+        try:
+            self._s3_client.head_object(
+                Bucket=self._s3_bucket, Key=f'documents/{paper_id}/metadata.json'
+            )
+
+        except BotocoreClientError as e:
+            if e.response.get('Error', {}).get('Code') in ('404', 'NoSuchKey'):
+                return False
+
+            raise self.DocDBClientError(
+                f'Failed to check the presence of the document {paper_id} in database: {e}'
+            ) from e
+
+        return True
+
     def add_document(
         self, document: doc_models.Document, name: str, description: str
     ) -> DocumentMetadata:
@@ -57,6 +85,9 @@ class DocDBClient:
     def register_as_survey(self, paper_id: str) -> SurveyMetadata:
         """Marks the document with the given id as a survey.
 
+        The caller is responsible for ensuring that the document is present in the database,
+        see `document_exists`.
+
         Args:
             paper_id: The identifier of an already added document.
 
@@ -64,11 +95,8 @@ class DocDBClient:
             The metadata of the freshly created survey.
 
         Raises:
-            DocDBClientError: If there is no document with the given id in the database.
+            DocDBClientError: If there is an error while saving the survey metadata to the database.
         """
-
-        if not self._document_exists(paper_id):
-            raise self.DocDBClientError(f'There is no document with the id {paper_id} in database.')
 
         survey_metadata = SurveyMetadata(paper_id=paper_id, referenced_docs={})
 
@@ -113,25 +141,18 @@ class DocDBClient:
     ) -> None:
         """Adds a referenced document to a survey in the database.
 
+        The caller is responsible for ensuring that both the survey and the referenced document
+        are present in the database, see `document_exists`.
+
         Args:
             survey_id: The identifier of the survey in the database.
             reference_id: The identifier of the reference in the survey.
             referenced_paper_id: The identifier of the referenced document in the database.
 
         Raises:
-            DocDBClientError: If there is no survey or referenced document with the given ids in
-                the database.
             DocDBClientError: If there is an error while adding the referenced document to
                 the survey in the database.
         """
-
-        if not self._document_exists(survey_id):
-            raise self.DocDBClientError(f'There is no survey with the id {survey_id} in database.')
-
-        if not self._document_exists(referenced_paper_id):
-            raise self.DocDBClientError(
-                f'There is no referenced document with the id {referenced_paper_id} in database.'
-            )
 
         survey_metadata_path = f'surveys/{survey_id}/metadata.json'
 
@@ -143,16 +164,15 @@ class DocDBClient:
     def delete_survey(self, survey_id: str) -> None:
         """Deletes a survey and its referenced documents from the database.
 
+        The caller is responsible for ensuring that the survey is present in the database,
+        see `document_exists`.
+
         Args:
             survey_id: The identifier of the survey to be deleted.
 
         Raises:
-            DocDBClientError: If there is no survey with the given id in the database.
             DocDBClientError: If there is an error while deleting the survey from the database.
         """
-
-        if not self._document_exists(survey_id):
-            raise self.DocDBClientError(f'There is no survey with the id {survey_id} in database.')
 
         try:
             metadata = self._get_model_from_db(
@@ -195,24 +215,6 @@ class DocDBClient:
             raise self.DocDBClientError(
                 f'Failed to delete document {paper_id} from database: {e}'
             ) from e
-
-    def _document_exists(self, paper_id: str) -> bool:
-        """Tells whether a document with the given id is present in the database."""
-
-        try:
-            self._s3_client.head_object(
-                Bucket=self._s3_bucket, Key=f'documents/{paper_id}/metadata.json'
-            )
-
-        except BotocoreClientError as e:
-            if e.response.get('Error', {}).get('Code') in ('404', 'NoSuchKey'):
-                return False
-
-            raise self.DocDBClientError(
-                f'Failed to check the presence of the document {paper_id} in database: {e}'
-            ) from e
-
-        return True
 
     def _download_and_store_images(
         self, document: doc_models.Document, doc_metadata: DocumentMetadata

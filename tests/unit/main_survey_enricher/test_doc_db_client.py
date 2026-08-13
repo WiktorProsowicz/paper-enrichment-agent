@@ -92,6 +92,43 @@ def patch_get_request_fails(monkeypatch):
 
 
 class TestDocDBClient:
+    def test_document_exists_returns_true_for_present_document(self):
+
+        mock_s3_client = MagicMock()
+
+        doc_db_client = DocDBClient(s3_client=mock_s3_client)
+
+        assert doc_db_client.document_exists(paper_id='sample_paper_id') is True
+
+        mock_s3_client.head_object.assert_called_once_with(
+            Bucket='document_database', Key='documents/sample_paper_id/metadata.json'
+        )
+
+    def test_document_exists_returns_false_for_missing_document(self):
+
+        mock_s3_client = MagicMock()
+        mock_s3_client.head_object.side_effect = BotocoreClientError(
+            {'Error': {'Code': '404'}}, 'HeadObject'
+        )
+
+        doc_db_client = DocDBClient(s3_client=mock_s3_client)
+
+        assert doc_db_client.document_exists(paper_id='sample_paper_id') is False
+
+    def test_document_exists_raises_when_presence_check_fails(self):
+
+        mock_s3_client = MagicMock()
+        mock_s3_client.head_object.side_effect = BotocoreClientError(
+            {'Error': {'Code': 'AccessDenied'}}, 'HeadObject'
+        )
+
+        doc_db_client = DocDBClient(s3_client=mock_s3_client)
+
+        with pytest.raises(
+            DocDBClient.DocDBClientError, match='Failed to check the presence of the document'
+        ):
+            doc_db_client.document_exists(paper_id='sample_paper_id')
+
     def test_add_document_raises_when_download_request_fails(
         self, sample_document, patch_get_request_fails
     ):
@@ -150,43 +187,10 @@ class TestDocDBClient:
         assert survey_meta.paper_id == 'sample_paper_id'
         assert survey_meta.referenced_docs == {}
 
-        mock_s3_client.head_object.assert_called_once_with(
-            Bucket='document_database', Key='documents/sample_paper_id/metadata.json'
-        )
         assert (
             mock_s3_client.put_object.call_args.kwargs['Key']
             == 'surveys/sample_paper_id/metadata.json'
         )
-
-    def test_register_as_survey_raises_when_document_is_missing(self):
-
-        mock_s3_client = MagicMock()
-        mock_s3_client.head_object.side_effect = BotocoreClientError(
-            {'Error': {'Code': '404'}}, 'HeadObject'
-        )
-
-        doc_db_client = DocDBClient(s3_client=mock_s3_client)
-
-        with pytest.raises(DocDBClient.DocDBClientError, match='There is no document with the id'):
-            doc_db_client.register_as_survey(paper_id='sample_paper_id')
-
-        assert mock_s3_client.put_object.call_count == 0
-
-    def test_register_as_survey_raises_when_presence_check_fails(self):
-
-        mock_s3_client = MagicMock()
-        mock_s3_client.head_object.side_effect = BotocoreClientError(
-            {'Error': {'Code': 'AccessDenied'}}, 'HeadObject'
-        )
-
-        doc_db_client = DocDBClient(s3_client=mock_s3_client)
-
-        with pytest.raises(
-            DocDBClient.DocDBClientError, match='Failed to check the presence of the document'
-        ):
-            doc_db_client.register_as_survey(paper_id='sample_paper_id')
-
-        assert mock_s3_client.put_object.call_count == 0
 
     def test_get_available_surveys_returns_empty_list(self):
 
@@ -244,44 +248,7 @@ class TestDocDBClient:
         ):
             doc_db_client.get_available_surveys()
 
-    def test_add_referenced_document_raises_on_nonexistent_survey(self):
-
-        def mock_head_object(**kwargs):
-            yield BotocoreClientError({'Error': {'Code': '404'}}, 'HeadObject')
-
-        mock_s3_client = MagicMock()
-        mock_s3_client.head_object.side_effect = mock_head_object()
-
-        doc_db_client = DocDBClient(s3_client=mock_s3_client)
-
-        with pytest.raises(DocDBClient.DocDBClientError, match='There is no survey with the id'):
-            doc_db_client.add_referenced_document(
-                survey_id='survey_id', reference_id='ref1', referenced_paper_id='ref_id'
-            )
-
-    def test_add_referenced_document_raises_on_nonexistent_ref(self):
-
-        def mock_head_object(**kwargs):
-            yield None
-            yield BotocoreClientError({'Error': {'Code': '404'}}, 'HeadObject')
-
-        mock_s3_client = MagicMock()
-        mock_s3_client.head_object.side_effect = mock_head_object()
-
-        doc_db_client = DocDBClient(s3_client=mock_s3_client)
-
-        with pytest.raises(
-            DocDBClient.DocDBClientError, match='There is no referenced document with the id'
-        ):
-            doc_db_client.add_referenced_document(
-                survey_id='survey_id', reference_id='ref1', referenced_paper_id='ref_id'
-            )
-
     def test_add_referenced_document_successful(self):
-
-        def mock_head_object(**kwargs):
-            yield None
-            yield None
 
         def mock_get_object(**kwargs):
             yield {
@@ -293,7 +260,6 @@ class TestDocDBClient:
             }
 
         mock_s3_client = MagicMock()
-        mock_s3_client.head_object.side_effect = mock_head_object()
         mock_s3_client.get_object.side_effect = mock_get_object()
 
         doc_db_client = DocDBClient(s3_client=mock_s3_client)
@@ -314,19 +280,6 @@ class TestDocDBClient:
                 ).model_dump()
             ).encode('utf-8'),
         )
-
-    def test_delete_survey_raises_on_nonexistent_survey(self):
-
-        def mock_head_object(**kwargs):
-            yield BotocoreClientError({'Error': {'Code': '404'}}, 'HeadObject')
-
-        mock_s3_client = MagicMock()
-        mock_s3_client.head_object.side_effect = mock_head_object()
-
-        doc_db_client = DocDBClient(s3_client=mock_s3_client)
-
-        with pytest.raises(DocDBClient.DocDBClientError, match='There is no survey with the id'):
-            doc_db_client.delete_survey('survey_id')
 
     def test_delete_survey_successful(self):
 
