@@ -136,6 +136,27 @@ class DocDBClient:
 
         return survey_metadata_list
 
+    def get_survey_info(self, survey_id: str) -> SurveyMetadata:
+        """Returns the metadata of the survey with the given id.
+
+        The caller is responsible for ensuring that the survey is present in the database,
+        see `document_exists`.
+
+        Args:
+            survey_id: The identifier of the survey in the database.
+
+        Returns:
+            The metadata of the requested survey.
+
+        Raises:
+            DocDBClientError: If there is an error while retrieving the survey metadata from
+                the database.
+        """
+
+        return self._get_model_from_db(
+            path=f'surveys/{survey_id}/metadata.json', model_type=SurveyMetadata
+        )
+
     def add_referenced_document(
         self, survey_id: str, reference_id: str, referenced_paper_id: str
     ) -> None:

@@ -100,3 +100,38 @@ class MainSurveyEnricherService:
             raise self.MainSurveyEnricherError(
                 f'Failed to register the survey for the arXiv paper with ID {arxiv_id}: {e}'
             ) from e
+
+    def remove_survey(self, survey_id: str) -> None:
+        """Removes a survey with the given survey ID.
+
+        Args:
+            survey_id: The ID of the survey to remove.
+
+        Raises:
+            MainSurveyEnricherError: If there was an error while removing the survey.
+        """
+
+        try:
+            start = time.perf_counter()
+            survey_metadata = self._db_client.get_survey_info(survey_id)
+            self._db_client.delete_survey(survey_id)
+            end = time.perf_counter()
+
+            _logger().info(
+                'Successfully removed the survey.',
+                survey_id=survey_id,
+                removed_references=len(survey_metadata.referenced_docs),
+            )
+            self._metrics.papers_removed.inc(len(survey_metadata.referenced_docs) + 1)
+            self._metrics.doc_db_operations_time.observe(end - start)
+
+        except DocDBClient.DocDBClientError as e:
+            _logger().error(
+                'Failed to remove the survey and its associated document.',
+                survey_id=survey_id,
+                error=str(e),
+            )
+
+            raise self.MainSurveyEnricherError(
+                f'Failed to remove the survey with ID {survey_id}: {e}'
+            ) from e

@@ -248,6 +248,40 @@ class TestDocDBClient:
         ):
             doc_db_client.get_available_surveys()
 
+    def test_get_survey_info_returns_metadata(self, sample_survey_metadatas):
+
+        def mock_get_object(**kwargs):
+            yield {
+                'Body': io.BytesIO(
+                    json.dumps(sample_survey_metadatas[0].model_dump()).encode('utf-8')
+                )
+            }
+
+        mock_s3_client = MagicMock()
+        mock_s3_client.get_object.side_effect = mock_get_object()
+
+        doc_db_client = DocDBClient(s3_client=mock_s3_client)
+
+        assert doc_db_client.get_survey_info('sample_paper_id_1') == sample_survey_metadatas[0]
+
+        mock_s3_client.get_object.assert_called_once_with(
+            Bucket='document_database', Key='surveys/sample_paper_id_1/metadata.json'
+        )
+
+    def test_get_survey_info_raises_on_retrieval_failure(self):
+
+        mock_s3_client = MagicMock()
+        mock_s3_client.get_object.side_effect = BotocoreClientError(
+            {'Error': {'Code': 'NoSuchKey'}}, 'GetObject'
+        )
+
+        doc_db_client = DocDBClient(s3_client=mock_s3_client)
+
+        with pytest.raises(
+            DocDBClient.DocDBClientError, match='Failed to retrieve JSON from database at'
+        ):
+            doc_db_client.get_survey_info('sample_paper_id')
+
     def test_add_referenced_document_successful(self):
 
         def mock_get_object(**kwargs):
