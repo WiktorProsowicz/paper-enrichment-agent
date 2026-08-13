@@ -108,12 +108,15 @@ class DocDBClient:
 
         return survey_metadata_list
 
-    def add_referenced_document(self, survey_id: str, referenced_doc_id: str) -> None:
+    def add_referenced_document(
+        self, survey_id: str, reference_id: str, referenced_paper_id: str
+    ) -> None:
         """Adds a referenced document to a survey in the database.
 
         Args:
             survey_id: The identifier of the survey in the database.
-            referenced_doc_id: The identifier of the referenced document in the database.
+            reference_id: The identifier of the reference in the survey.
+            referenced_paper_id: The identifier of the referenced document in the database.
 
         Raises:
             DocDBClientError: If there is no survey or referenced document with the given ids in
@@ -125,9 +128,9 @@ class DocDBClient:
         if not self._document_exists(survey_id):
             raise self.DocDBClientError(f'There is no survey with the id {survey_id} in database.')
 
-        if not self._document_exists(referenced_doc_id):
+        if not self._document_exists(referenced_paper_id):
             raise self.DocDBClientError(
-                f'There is no referenced document with the id {referenced_doc_id} in database.'
+                f'There is no referenced document with the id {referenced_paper_id} in database.'
             )
 
         survey_metadata_path = f'surveys/{survey_id}/metadata.json'
@@ -135,7 +138,7 @@ class DocDBClient:
         with self._get_model_reference(
             path=survey_metadata_path, model_type=SurveyMetadata
         ) as survey:
-            survey.referenced_docs[referenced_doc_id] = referenced_doc_id
+            survey.referenced_docs[reference_id] = referenced_paper_id
 
     def _document_exists(self, paper_id: str) -> bool:
         """Tells whether a document with the given id is present in the database."""

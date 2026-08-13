@@ -42,7 +42,9 @@ def sample_document() -> doc_models.Document:
             )
         ],
         footnotes=[],
-        referenced_papers=[],
+        referenced_papers=[
+            ('ref1', 'This is a sample referenced paper 1.'),
+        ],
     )
 
 
@@ -253,7 +255,9 @@ class TestDocDBClient:
         doc_db_client = DocDBClient(s3_client=mock_s3_client)
 
         with pytest.raises(DocDBClient.DocDBClientError, match='There is no survey with the id'):
-            doc_db_client.add_referenced_document('survey_id', 'ref_id')
+            doc_db_client.add_referenced_document(
+                survey_id='survey_id', reference_id='ref1', referenced_paper_id='ref_id'
+            )
 
     def test_add_referenced_document_raises_on_nonexistent_ref(self):
 
@@ -269,4 +273,44 @@ class TestDocDBClient:
         with pytest.raises(
             DocDBClient.DocDBClientError, match='There is no referenced document with the id'
         ):
-            doc_db_client.add_referenced_document('survey_id', 'ref_id')
+            doc_db_client.add_referenced_document(
+                survey_id='survey_id', reference_id='ref1', referenced_paper_id='ref_id'
+            )
+
+    def test_add_referenced_document_successful(self):
+
+        def mock_head_object(**kwargs):
+            yield None
+            yield None
+
+        def mock_get_object(**kwargs):
+            yield {
+                'Body': io.BytesIO(
+                    json.dumps(
+                        SurveyMetadata(paper_id='survey_id', referenced_docs={}).model_dump()
+                    ).encode('utf-8')
+                )
+            }
+
+        mock_s3_client = MagicMock()
+        mock_s3_client.head_object.side_effect = mock_head_object()
+        mock_s3_client.get_object.side_effect = mock_get_object()
+
+        doc_db_client = DocDBClient(s3_client=mock_s3_client)
+
+        doc_db_client.add_referenced_document(
+            survey_id='survey_id', reference_id='ref1', referenced_paper_id='ref_id'
+        )
+
+        mock_s3_client.get_object.assert_called_once_with(
+            Bucket='document_database', Key='surveys/survey_id/metadata.json'
+        )
+        mock_s3_client.put_object.assert_called_once_with(
+            Bucket='document_database',
+            Key='surveys/survey_id/metadata.json',
+            Body=json.dumps(
+                SurveyMetadata(
+                    paper_id='survey_id', referenced_docs={'ref1': 'ref_id'}
+                ).model_dump()
+            ).encode('utf-8'),
+        )
