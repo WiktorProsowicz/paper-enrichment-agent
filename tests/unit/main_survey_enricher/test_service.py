@@ -401,3 +401,70 @@ class TestListSurveys:
 
         with pytest.raises(RuntimeError, match='Unexpected failure'):
             service.list_surveys()
+
+
+class TestGetSurveyInfo:
+    @pytest.fixture
+    def mock_db_client(self) -> MagicMock:
+
+        db_client = MagicMock()
+        db_client.get_survey_info.return_value = SurveyMetadata(
+            paper_id=SAMPLE_SURVEY_ID,
+            referenced_docs={'ref1': 'ref_paper_id_1', 'ref2': 'ref_paper_id_2'},
+        )
+        return db_client
+
+    def test_gets_survey_info(self, mock_metrics, mock_db_client):
+
+        service = MainSurveyEnricherService(metrics=mock_metrics, db_client=mock_db_client)
+        survey_info = service.get_survey_info(survey_id=SAMPLE_SURVEY_ID)
+
+        mock_db_client.get_survey_info.assert_called_once_with(SAMPLE_SURVEY_ID)
+        assert survey_info.paper_id == SAMPLE_SURVEY_ID
+        assert len(survey_info.referenced_docs) == 2
+
+    def test_raises_when_survey_info_retrieval_fails(self, mock_metrics, mock_db_client):
+
+        mock_db_client.get_survey_info.side_effect = DocDBClient.DocDBClientError(
+            'Retrieval failed'
+        )
+
+        service = MainSurveyEnricherService(metrics=mock_metrics, db_client=mock_db_client)
+
+        with pytest.raises(
+            MainSurveyEnricherService.MainSurveyEnricherError,
+            match=f'Failed to retrieve information about the survey with ID',
+        ):
+            service.get_survey_info(survey_id=SAMPLE_SURVEY_ID)
+
+
+class TestGetDocumentDetails:
+    @pytest.fixture
+    def mock_db_client(self) -> MagicMock:
+
+        db_client = MagicMock()
+        db_client.get_document_metadata.return_value = DocumentMetadata(
+            paper_id='sample_paper_id',
+            name=SAMPLE_NAME,
+            description=SAMPLE_DESCRIPTION,
+            images={},
+        )
+        db_client.get_document_struct_ref.return_value.__enter__.return_value = doc_models.Document(
+            abstract='This is a sample abstract.',
+            description='This is a sample description.',
+            sections=[],
+            footnotes=[],
+            referenced_papers=[],
+        )
+        return db_client
+
+    def test_gets_document_details(self, mock_metrics, mock_db_client):
+
+        service = MainSurveyEnricherService(metrics=mock_metrics, db_client=mock_db_client)
+        metadata, document = service.get_document_details(paper_id='sample_paper_id')
+
+        mock_db_client.get_document_metadata.assert_called_once_with('sample_paper_id')
+        mock_db_client.get_document_struct_ref.assert_called_once_with('sample_paper_id')
+
+        assert metadata.paper_id == 'sample_paper_id'
+        assert document.abstract == 'This is a sample abstract.'

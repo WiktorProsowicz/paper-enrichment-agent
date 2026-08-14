@@ -9,6 +9,7 @@ import time
 from functools import cache
 
 from paper_enrichment_agent.common import logging_setup
+from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models.misc import DocumentMetadata, SurveyMetadata
 from paper_enrichment_agent.main_survey_enricher.components.arxiv_parser import ArxivParser
 from paper_enrichment_agent.main_survey_enricher.components.doc_db_client import DocDBClient
@@ -166,3 +167,74 @@ class MainSurveyEnricherService:
             )
 
             raise self.MainSurveyEnricherError(f'Failed to list the registered surveys: {e}') from e
+
+    def get_survey_info(self, survey_id: str) -> SurveyMetadata:
+        """Retrieves information about a specific survey.
+
+        Args:
+            survey_id: The ID of the survey to retrieve information for.
+
+        Returns:
+            A `SurveyMetadata` object representing the survey.
+        """
+
+        try:
+            start = time.perf_counter()
+            survey_info = self._db_client.get_survey_info(survey_id)
+            end = time.perf_counter()
+
+            _logger().info(
+                'Successfully retrieved information about the survey.',
+                survey_id=survey_id,
+                num_references=len(survey_info.referenced_docs),
+            )
+            self._metrics.doc_db_operations_time.observe(end - start)
+
+            return survey_info
+
+        except DocDBClient.DocDBClientError as e:
+            _logger().error(
+                'Failed to retrieve information about the survey.',
+                survey_id=survey_id,
+                error=str(e),
+            )
+
+            raise self.MainSurveyEnricherError(
+                f'Failed to retrieve information about the survey with ID {survey_id}: {e}'
+            ) from e
+
+    def get_document_details(self, paper_id: str) -> tuple[DocumentMetadata, doc_models.Document]:
+        """Retrieves detailed information about a specific document.
+
+        Args:
+            paper_id: The ID of the document to retrieve information for.
+
+        Returns:
+            A tuple containing a `DocumentMetadata` object and a `Document` object representing the document.
+        """
+
+        try:
+            start = time.perf_counter()
+            metadata = self._db_client.get_document_metadata(paper_id)
+            with self._db_client.get_document_struct_ref(paper_id) as document:
+                document = document.model_copy(deep=True)
+            end = time.perf_counter()
+
+            _logger().info(
+                'Successfully retrieved detailed information about the document.',
+                paper_id=paper_id,
+            )
+            self._metrics.doc_db_operations_time.observe(end - start)
+
+            return metadata, document
+
+        except DocDBClient.DocDBClientError as e:
+            _logger().error(
+                'Failed to retrieve detailed information about the document.',
+                paper_id=paper_id,
+                error=str(e),
+            )
+
+            raise self.MainSurveyEnricherError(
+                f'Failed to retrieve detailed information about the document with ID {paper_id}: {e}'
+            ) from e

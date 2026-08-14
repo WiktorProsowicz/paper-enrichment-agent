@@ -228,6 +228,17 @@ class DocDBClient:
         ) as document:
             yield document
 
+    def get_document_metadata(self, paper_id: str) -> DocumentMetadata:
+        """Retrieves the metadata of a document from the database.
+
+        Args:
+            paper_id: The identifier of the document in the database.
+        """
+
+        return self._get_model_from_db(
+            path=f'documents/{paper_id}/metadata.json', model_type=DocumentMetadata
+        )
+
     def _delete_document(self, paper_id: str) -> None:
         """Deletes a document and its images from the database."""
 

@@ -9,7 +9,7 @@ from unittest.mock import Mock, MagicMock
 
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.main_survey_enricher.components.doc_db_client import DocDBClient
-from paper_enrichment_agent.common.models.misc import SurveyMetadata
+from paper_enrichment_agent.common.models.misc import SurveyMetadata, DocumentMetadata
 
 
 @pytest.fixture
@@ -382,3 +382,37 @@ class TestDocDBClient:
             ]
             == []
         )
+
+    def test_get_document_metadata_returns_correct_metadata(self):
+
+        def mock_get_object(**kwargs):
+
+            yield {
+                'Body': io.BytesIO(
+                    json.dumps(
+                        DocumentMetadata(
+                            paper_id='sample_paper_id',
+                            name='Sample Document',
+                            description='Sample Description',
+                            images={
+                                '/sections/0/1/0': '/documents/sample_paper_id/images/image1.png',
+                                '/sections/0/1/1': '/documents/sample_paper_id/images/image2.png',
+                            },
+                        ).model_dump()
+                    ).encode('utf-8')
+                )
+            }
+
+        mock_s3_client = MagicMock()
+        mock_s3_client.get_object.side_effect = mock_get_object()
+
+        doc_db_client = DocDBClient(s3_client=mock_s3_client)
+        metadata = doc_db_client.get_document_metadata('sample_paper_id')
+
+        assert metadata.paper_id == 'sample_paper_id'
+        assert metadata.name == 'Sample Document'
+        assert metadata.description == 'Sample Description'
+        assert metadata.images == {
+            '/sections/0/1/0': '/documents/sample_paper_id/images/image1.png',
+            '/sections/0/1/1': '/documents/sample_paper_id/images/image2.png',
+        }
