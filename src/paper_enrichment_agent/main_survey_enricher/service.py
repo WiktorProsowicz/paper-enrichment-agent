@@ -39,9 +39,6 @@ class MainSurveyEnricherService:
             arxiv_id: The arXiv ID of the paper to register a survey for.
             name: The name of the survey document to register.
             description: The description of the survey document to register.
-
-        Raises:
-            MainSurveyEnricherError: If the survey could not be registered.
         """
 
         try:
@@ -96,7 +93,6 @@ class MainSurveyEnricherService:
                 description=description,
                 error=str(e),
             )
-            self._metrics.papers_added.labels(source='arxiv').inc()
 
             raise self.MainSurveyEnricherError(
                 f'Failed to register the survey for the arXiv paper with ID {arxiv_id}: {e}'
@@ -107,9 +103,6 @@ class MainSurveyEnricherService:
 
         Args:
             survey_id: The ID of the survey to remove.
-
-        Raises:
-            MainSurveyEnricherError: If there was an error while removing the survey.
         """
 
         try:
@@ -142,9 +135,6 @@ class MainSurveyEnricherService:
 
         Returns:
             A list of `SurveyMetadata` objects representing the registered surveys.
-
-        Raises:
-            MainSurveyEnricherError: If there was an error while listing the surveys.
         """
 
         try:
@@ -210,7 +200,8 @@ class MainSurveyEnricherService:
             paper_id: The ID of the document to retrieve information for.
 
         Returns:
-            A tuple containing a `DocumentMetadata` object and a `Document` object representing the document.
+            A tuple containing a `DocumentMetadata` object and a `Document` object representing the
+            document.
         """
 
         try:

@@ -20,6 +20,9 @@ class ArxivParser:
 
     The internal state of the parser is built during parsing, therefore a single instance of the
     parser should be used for parsing a single paper.
+
+    The parser raises `ParsingError` if it encounters an error during the parsing of the arXiv
+    paper.
     """
 
     _ALLOWED_SECTION_CLASSES = (

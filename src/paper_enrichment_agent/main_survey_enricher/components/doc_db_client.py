@@ -16,7 +16,10 @@ from paper_enrichment_agent.common.models.misc import DocumentMetadata, SurveyMe
 
 
 class DocDBClient:
-    """Handles read/write requests to the document database."""
+    """Handles read/write requests to the document database.
+
+    The operations raise `DocDBClientError` on failure.
+    """
 
     class DocDBClientError(Exception):
         """Base class for exceptions raised by the `DocDBClient`."""
@@ -34,9 +37,6 @@ class DocDBClient:
 
         Returns:
             True if the document is present in the database, False otherwise.
-
-        Raises:
-            DocDBClientError: If there is an error while checking the presence of the document.
         """
 
         try:
@@ -66,9 +66,6 @@ class DocDBClient:
 
         Returns:
             The metadata of the freshly added document.
-
-        Raises:
-            DocDBClientError: If there is an error while adding the document to the database.
         """
 
         doc_metadata = DocumentMetadata(name=name, description=description, images={})
@@ -93,9 +90,6 @@ class DocDBClient:
 
         Returns:
             The metadata of the freshly created survey.
-
-        Raises:
-            DocDBClientError: If there is an error while saving the survey metadata to the database.
         """
 
         survey_metadata = SurveyMetadata(paper_id=paper_id, referenced_docs={})
@@ -109,9 +103,6 @@ class DocDBClient:
 
         Returns:
             A list of `SurveyMetadata` objects representing the available surveys.
-
-        Raises:
-            DocDBClientError: If there is an error while retrieving the surveys from the database.
         """
 
         try:
@@ -147,10 +138,6 @@ class DocDBClient:
 
         Returns:
             The metadata of the requested survey.
-
-        Raises:
-            DocDBClientError: If there is an error while retrieving the survey metadata from
-                the database.
         """
 
         return self._get_model_from_db(
@@ -169,10 +156,6 @@ class DocDBClient:
             survey_id: The identifier of the survey in the database.
             reference_id: The identifier of the reference in the survey.
             referenced_paper_id: The identifier of the referenced document in the database.
-
-        Raises:
-            DocDBClientError: If there is an error while adding the referenced document to
-                the survey in the database.
         """
 
         survey_metadata_path = f'surveys/{survey_id}/metadata.json'
@@ -190,9 +173,6 @@ class DocDBClient:
 
         Args:
             survey_id: The identifier of the survey to be deleted.
-
-        Raises:
-            DocDBClientError: If there is an error while deleting the survey from the database.
         """
 
         try:
