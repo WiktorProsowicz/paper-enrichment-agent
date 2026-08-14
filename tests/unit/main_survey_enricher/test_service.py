@@ -15,9 +15,9 @@ SAMPLE_SURVEY_ID = 'sample_survey_id'
 
 
 @pytest.fixture
-def sample_document() -> doc_models.Document:
+def sample_survey_document() -> tuple[doc_models.Document, DocumentMetadata]:
 
-    return doc_models.Document(
+    document = doc_models.Document(
         abstract='This is a sample abstract.',
         description='This is a sample description.',
         sections=[
@@ -33,19 +33,51 @@ def sample_document() -> doc_models.Document:
         footnotes=[],
         referenced_papers=[('ref1', 'Reference Paper 1'), ('ref2', 'Reference Paper 2')],
     )
+    metadata = DocumentMetadata(
+        paper_id='sample_paper_id',
+        name=SAMPLE_NAME,
+        description=SAMPLE_DESCRIPTION,
+        images={},
+    )
+    return document, metadata
 
 
 @pytest.fixture
-def patch_arxiv_parser(monkeypatch, sample_document):
+def ref1_document() -> tuple[doc_models.Document, DocumentMetadata]:
 
-    parser = MagicMock(parse=Mock(return_value=sample_document))
-
-    monkeypatch.setattr(
-        'paper_enrichment_agent.main_survey_enricher.service.ArxivParser',
-        Mock(return_value=parser, ParsingError=ArxivParser.ParsingError),
+    document = doc_models.Document(
+        abstract='This is a sample abstract for Reference Paper 1.',
+        description='This is a sample description for Reference Paper 1.',
+        sections=[],
+        footnotes=[],
+        referenced_papers=[],
     )
+    metadata = DocumentMetadata(
+        paper_id='ref1_paper_id',
+        name='Reference Paper 1',
+        description='This is a sample description for Reference Paper 1.',
+        images={},
+    )
+    return document, metadata
 
-    return parser
+
+@pytest.fixture
+def ref2_document() -> tuple[doc_models.Document, DocumentMetadata]:
+
+    document = doc_models.Document(
+        abstract='This is a sample abstract for Reference Paper 2.',
+        description='This is a sample description for Reference Paper 2.',
+        sections=[],
+        footnotes=[],
+        referenced_papers=[],
+    )
+    metadata = DocumentMetadata(
+        paper_id='ref2_paper_id',
+        name='Reference Paper 2',
+        description='This is a sample description for Reference Paper 2.',
+        images={},
+    )
+    return document, metadata
 
 
 @pytest.fixture
@@ -79,27 +111,38 @@ def patch_logger(monkeypatch) -> MagicMock:
     return mock_logger
 
 
-@pytest.fixture
-def mock_db_client() -> MagicMock:
-
-    db_client = MagicMock()
-    db_client.add_document.return_value = DocumentMetadata(
-        paper_id='sample_paper_id', name=SAMPLE_NAME, description=SAMPLE_DESCRIPTION, images={}
-    )
-    db_client.register_as_survey.return_value = SurveyMetadata(
-        paper_id='sample_paper_id', referenced_docs={}
-    )
-    db_client.get_survey_info.return_value = SurveyMetadata(
-        paper_id=SAMPLE_SURVEY_ID,
-        referenced_docs={'ref1': 'ref_paper_id_1', 'ref2': 'ref_paper_id_2'},
-    )
-
-    return db_client
-
-
 class TestRegisterArxivSurvey:
+    @pytest.fixture
+    def mock_db_client(self) -> MagicMock:
+
+        db_client = MagicMock()
+        db_client.add_document.return_value = DocumentMetadata(
+            paper_id='sample_paper_id', name=SAMPLE_NAME, description=SAMPLE_DESCRIPTION, images={}
+        )
+        db_client.register_as_survey.return_value = SurveyMetadata(
+            paper_id='sample_paper_id', referenced_docs={}
+        )
+        db_client.get_survey_info.return_value = SurveyMetadata(
+            paper_id=SAMPLE_SURVEY_ID,
+            referenced_docs={'ref1': 'ref_paper_id_1', 'ref2': 'ref_paper_id_2'},
+        )
+
+        return db_client
+
+    @pytest.fixture
+    def patch_arxiv_parser(self, monkeypatch, sample_survey_document):
+
+        parser = MagicMock(parse=Mock(return_value=sample_survey_document))
+
+        monkeypatch.setattr(
+            'paper_enrichment_agent.main_survey_enricher.service.ArxivParser',
+            Mock(return_value=parser, ParsingError=ArxivParser.ParsingError),
+        )
+
+        return parser
+
     def test_adds_document_and_registers_survey(
-        self, patch_arxiv_parser, mock_metrics, mock_db_client, sample_document
+        self, patch_arxiv_parser, mock_metrics, mock_db_client, sample_survey_document
     ):
 
         service = MainSurveyEnricherService(metrics=mock_metrics, db_client=mock_db_client)
@@ -109,7 +152,7 @@ class TestRegisterArxivSurvey:
 
         patch_arxiv_parser.parse.assert_called_once_with(SAMPLE_ARXIV_ID)
         mock_db_client.add_document.assert_called_once_with(
-            document=sample_document, name=SAMPLE_NAME, description=SAMPLE_DESCRIPTION
+            document=sample_survey_document, name=SAMPLE_NAME, description=SAMPLE_DESCRIPTION
         )
         mock_db_client.register_as_survey.assert_called_once_with(paper_id='sample_paper_id')
 
@@ -221,10 +264,20 @@ class TestRegisterArxivSurvey:
 
 
 class TestRemoveSurvey:
+    @pytest.fixture
+    def mock_db_client(self) -> MagicMock:
+
+        db_client = MagicMock()
+        db_client.get_survey_info.return_value = SurveyMetadata(
+            paper_id=SAMPLE_SURVEY_ID,
+            referenced_docs={'ref1': 'ref_paper_id_1', 'ref2': 'ref_paper_id_2'},
+        )
+        return db_client
+
     def test_deletes_survey(self, mock_metrics, mock_db_client):
 
         service = MainSurveyEnricherService(metrics=mock_metrics, db_client=mock_db_client)
-        service.remove_survey(survey_id=SAMPLE_SURVEY_ID)
+        service.remove_survey(SAMPLE_SURVEY_ID)
 
         mock_db_client.get_survey_info.assert_called_once_with(SAMPLE_SURVEY_ID)
         mock_db_client.delete_survey.assert_called_once_with(SAMPLE_SURVEY_ID)
@@ -242,7 +295,8 @@ class TestRemoveSurvey:
     def test_counts_survey_without_references(self, mock_metrics, mock_db_client):
 
         mock_db_client.get_survey_info.return_value = SurveyMetadata(
-            paper_id=SAMPLE_SURVEY_ID, referenced_docs={}
+            paper_id=SAMPLE_SURVEY_ID,
+            referenced_docs={},
         )
 
         service = MainSurveyEnricherService(metrics=mock_metrics, db_client=mock_db_client)
