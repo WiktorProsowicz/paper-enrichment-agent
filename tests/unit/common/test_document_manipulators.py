@@ -1,6 +1,6 @@
 import pytest
 
-from paper_enrichment_agent.common.document_getter import DocumentGetter
+from paper_enrichment_agent.common.document_manipulators import DocumentGetter
 from paper_enrichment_agent.common.models import document as doc_models
 
 

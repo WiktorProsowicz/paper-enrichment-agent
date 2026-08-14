@@ -10,7 +10,7 @@ import requests
 from botocore.exceptions import ClientError as BotocoreClientError
 from mypy_boto3_s3 import S3Client
 
-from paper_enrichment_agent.common.document_getter import DocumentGetter
+from paper_enrichment_agent.common.document_manipulators import DocumentGetter
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models.misc import DocumentMetadata, SurveyMetadata
 

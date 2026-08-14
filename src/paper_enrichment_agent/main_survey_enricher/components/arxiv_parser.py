@@ -11,7 +11,7 @@ import bs4
 import requests
 from bs4.element import NavigableString
 
-from paper_enrichment_agent.common import document_getter
+from paper_enrichment_agent.common import document_manipulators
 from paper_enrichment_agent.common.models import document as doc_models
 
 
@@ -77,7 +77,7 @@ class ArxivParser:
         self._resolve_references(document)
 
         # Fix the image sources to point to the ar5iv.labs.arxiv.org domain.
-        for image in document_getter.DocumentGetter(document).iter_components_of_type(
+        for image in document_manipulators.DocumentGetter(document).iter_components_of_type(
             doc_models.ImgSubfigure
         ):
             image.image_src = f'https://ar5iv.labs.arxiv.org{image.image_src}'
@@ -87,7 +87,7 @@ class ArxivParser:
     def _resolve_references(self, document: doc_models.Document) -> None:
         """Fixes the reference targets and types after having processed the document."""
 
-        doc_getter = document_getter.DocumentGetter(document)
+        doc_getter = document_manipulators.DocumentGetter(document)
 
         for reference in doc_getter.iter_components_of_type(doc_models.Reference):
             if reference.ref_type == 'element':
