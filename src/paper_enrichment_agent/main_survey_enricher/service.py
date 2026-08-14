@@ -135,3 +135,34 @@ class MainSurveyEnricherService:
             raise self.MainSurveyEnricherError(
                 f'Failed to remove the survey with ID {survey_id}: {e}'
             ) from e
+
+    def list_surveys(self) -> list[SurveyMetadata]:
+        """Lists all registered surveys.
+
+        Returns:
+            A list of `SurveyMetadata` objects representing the registered surveys.
+
+        Raises:
+            MainSurveyEnricherError: If there was an error while listing the surveys.
+        """
+
+        try:
+            start = time.perf_counter()
+            surveys = self._db_client.get_available_surveys()
+            end = time.perf_counter()
+
+            _logger().info(
+                'Successfully listed the registered surveys.',
+                num_surveys=len(surveys),
+            )
+            self._metrics.doc_db_operations_time.observe(end - start)
+
+            return surveys
+
+        except DocDBClient.DocDBClientError as e:
+            _logger().error(
+                'Failed to list the registered surveys.',
+                error=str(e),
+            )
+
+            raise self.MainSurveyEnricherError(f'Failed to list the registered surveys: {e}') from e

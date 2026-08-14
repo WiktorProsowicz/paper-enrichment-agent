@@ -345,3 +345,59 @@ class TestRemoveSurvey:
 
         with pytest.raises(RuntimeError, match='Unexpected failure'):
             service.remove_survey(survey_id=SAMPLE_SURVEY_ID)
+
+
+class TestListSurveys:
+    @pytest.fixture
+    def mock_db_client(self) -> MagicMock:
+
+        db_client = MagicMock()
+        db_client.get_available_surveys.return_value = [
+            SurveyMetadata(
+                paper_id='survey1',
+                referenced_docs={'ref1': 'ref_paper_id_1', 'ref2': 'ref_paper_id_2'},
+            ),
+            SurveyMetadata(
+                paper_id='survey2',
+                referenced_docs={'ref3': 'ref_paper_id_3'},
+            ),
+        ]
+        return db_client
+
+    def test_lists_surveys(self, mock_metrics, mock_db_client):
+
+        service = MainSurveyEnricherService(metrics=mock_metrics, db_client=mock_db_client)
+        surveys = service.list_surveys()
+
+        mock_db_client.get_available_surveys.assert_called_once()
+        assert len(surveys) == 2
+        assert surveys[0].paper_id == 'survey1'
+        assert surveys[1].paper_id == 'survey2'
+
+        mock_metrics.doc_db_operations_time.observe.assert_called_once()
+        assert mock_metrics.doc_db_operations_time.observe.call_args.args[0] >= 0
+
+    def test_raises_when_listing_surveys_fails(self, mock_metrics, mock_db_client):
+
+        mock_db_client.get_available_surveys.side_effect = DocDBClient.DocDBClientError(
+            'Listing failed'
+        )
+
+        service = MainSurveyEnricherService(metrics=mock_metrics, db_client=mock_db_client)
+
+        with pytest.raises(
+            MainSurveyEnricherService.MainSurveyEnricherError,
+            match='Failed to list the registered surveys',
+        ):
+            service.list_surveys()
+
+        assert mock_metrics.doc_db_operations_time.observe.call_count == 0
+
+    def test_does_not_swallow_unexpected_errors(self, mock_metrics, mock_db_client):
+
+        mock_db_client.get_available_surveys.side_effect = RuntimeError('Unexpected failure')
+
+        service = MainSurveyEnricherService(metrics=mock_metrics, db_client=mock_db_client)
+
+        with pytest.raises(RuntimeError, match='Unexpected failure'):
+            service.list_surveys()
