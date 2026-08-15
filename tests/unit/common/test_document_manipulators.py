@@ -1,6 +1,6 @@
 import pytest
 
-from paper_enrichment_agent.common.document_manipulators import DocumentGetter
+from paper_enrichment_agent.common.document_manipulators import DocumentGetter, DocumentSetter
 from paper_enrichment_agent.common.models import document as doc_models
 
 
@@ -202,3 +202,23 @@ class TestDocumentGetter:
 
         with pytest.raises(ValueError):
             getter.get_component_by_path('/non_existent/path')
+
+
+class TestDocumentSetter:
+    def test_remove_component_with_path(self, sample_document):
+        setter = DocumentSetter(sample_document)
+
+        setter.remove_component_with_path('/sections/section_1/paragraph_1/ref_1')
+        assert len(sample_document.sections[0].components[0].elements) == 1
+
+        setter.remove_component_with_path('/sections/section_1/paragraph_1')
+        assert len(sample_document.sections[0].components) == 1
+
+        setter.remove_component_with_path('/sections/section_1/figure_1/img_subfig_1')
+        assert len(sample_document.sections[0].components[0].subfigures) == 1
+
+        setter.remove_component_with_path('/sections/section_2/list_1/list_item_1')
+        assert len(sample_document.sections[1].components[3].items) == 1
+
+        setter.remove_component_with_path('/footnotes/footnote_2/math_expr')
+        assert len(sample_document.footnotes[1].components) == 0
