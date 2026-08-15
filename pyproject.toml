@@ -46,6 +46,9 @@ exclude = ["tests"]
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["I"]
+
 [tool.ruff.format]
 quote-style = "single"
 indent-style = "space"
