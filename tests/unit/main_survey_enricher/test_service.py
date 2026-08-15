@@ -468,3 +468,52 @@ class TestGetDocumentDetails:
 
         assert metadata.paper_id == 'sample_paper_id'
         assert document.abstract == 'This is a sample abstract.'
+
+
+class TestRemoveDocumentComponent:
+    @pytest.fixture
+    def mock_db_client(self) -> MagicMock:
+
+        db_client = MagicMock()
+        db_client.get_document_struct_ref.return_value.__enter__.return_value = doc_models.Document(
+            abstract='This is a sample abstract.',
+            description='This is a sample description.',
+            sections=[
+                doc_models.Section(
+                    component_id='section1',
+                    title='Introduction',
+                    components=[
+                        doc_models.Paragraph(
+                            component_id='paragraph1',
+                            elements=['This is a sample paragraph in the introduction section.'],
+                        )
+                    ],
+                )
+            ],
+            footnotes=[],
+            referenced_papers=[],
+        )
+        return db_client
+
+    def test_raises_when_invalid_path(self, mock_metrics, mock_db_client):
+
+        service = MainSurveyEnricherService(metrics=mock_metrics, db_client=mock_db_client)
+
+        with pytest.raises(
+            MainSurveyEnricherService.MainSurveyEnricherError,
+            match='Failed to remove component',
+        ):
+            service.remove_document_component(
+                paper_id='sample_paper_id', component_path='/non/existent/path'
+            )
+
+    def test_removes_component_successfully(self, mock_metrics, mock_db_client):
+
+        service = MainSurveyEnricherService(metrics=mock_metrics, db_client=mock_db_client)
+
+        service.remove_document_component(
+            paper_id='sample_paper_id', component_path='/sections/section1/paragraph1'
+        )
+
+        mock_db_client.get_document_struct_ref.assert_called_once_with('sample_paper_id')
+        mock_metrics.doc_db_operations_time.observe.assert_called_once()

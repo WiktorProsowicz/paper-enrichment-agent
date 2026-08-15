@@ -8,7 +8,7 @@ fulfill the designed use cases of the entire application.
 import time
 from functools import cache
 
-from paper_enrichment_agent.common import logging_setup
+from paper_enrichment_agent.common import document_manipulators, logging_setup
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models.misc import DocumentMetadata, SurveyMetadata
 from paper_enrichment_agent.main_survey_enricher.components.arxiv_parser import ArxivParser
@@ -228,4 +228,38 @@ class MainSurveyEnricherService:
 
             raise self.MainSurveyEnricherError(
                 f'Failed to retrieve detailed information about the document with ID {paper_id}: {e}'
+            ) from e
+
+    def remove_document_component(self, paper_id: str, component_path: str) -> None:
+        """Removes a specific component from a document.
+
+        Args:
+            paper_id: The ID of the document to remove the component from.
+            component_path: The path of the component to remove.
+        """
+
+        try:
+            start = time.perf_counter()
+            with self._db_client.get_document_struct_ref(paper_id) as document:
+                doc_setter = document_manipulators.DocumentSetter(document)
+                doc_setter.remove_component_with_path(component_path)
+            end = time.perf_counter()
+
+            _logger().info(
+                'Successfully removed the component from the document.',
+                paper_id=paper_id,
+                component_path=component_path,
+            )
+            self._metrics.doc_db_operations_time.observe(end - start)
+
+        except (DocDBClient.DocDBClientError, ValueError) as e:
+            _logger().error(
+                'Failed to remove the component from the document.',
+                paper_id=paper_id,
+                component_path=component_path,
+                error=str(e),
+            )
+
+            raise self.MainSurveyEnricherError(
+                f'Failed to remove component "{component_path}" from the document {paper_id}: {e}'
             ) from e
