@@ -4,7 +4,10 @@ version = "0.1.0"
 requires-python=">=3.12"
 dependencies = [
     "beautifulsoup4>=4.15.0",
+    "boto3>=1.43.67",
+    "boto3-stubs[s3]>=1.43.68",
     "fastapi>=0.140.7",
+    "prometheus-client>=0.26.0",
     "pydantic>=2.13.4",
     "requests>=2.34.2",
 ]
@@ -16,8 +19,10 @@ dev = [
     "pre-commit>=4.6.1",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
+    "pytest-dependency>=0.6.1",
     "pytest-mock>=3.15.1",
     "ruff>=0.16.0",
+    "structlog>=26.1.0",
 ]
 
 [tool.ruff]
@@ -40,6 +45,9 @@ exclude = ["tests"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["I"]
 
 [tool.ruff.format]
 quote-style = "single"

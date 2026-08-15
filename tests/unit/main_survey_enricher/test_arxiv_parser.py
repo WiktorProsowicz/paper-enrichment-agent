@@ -4,9 +4,9 @@ from unittest.mock import Mock
 import pytest
 import requests
 
-from paper_enrichment_agent.common.document_getter import DocumentGetter
+from paper_enrichment_agent.common.document_manipulators import DocumentGetter
 from paper_enrichment_agent.common.models import document as doc_models
-from paper_enrichment_agent.main_survey_enricher.arxiv_parser import ArxivParser
+from paper_enrichment_agent.main_survey_enricher.components.arxiv_parser import ArxivParser
 
 EXAMPLE_PAPER_1 = '1905.09263'
 EXAMPLE_PAPER_2 = '2006.04558'
@@ -50,7 +50,7 @@ def mock_example_paper(monkeypatch):
         return Mock(content=b'', raise_for_status=raise_for_status)
 
     monkeypatch.setattr(
-        'paper_enrichment_agent.main_survey_enricher.arxiv_parser.requests.get', fake_get
+        'paper_enrichment_agent.main_survey_enricher.components.arxiv_parser.requests.get', fake_get
     )
 
 
@@ -145,9 +145,15 @@ class TestArxivParser:
         first_figure_subfigures = all_figures[0].subfigures
 
         assert len(first_figure_subfigures) == 4
-        assert first_figure_subfigures[0].image_src == '/html/1905.09263/assets/x1.png'
+        assert (
+            first_figure_subfigures[0].image_src
+            == 'https://ar5iv.labs.arxiv.org/html/1905.09263/assets/x1.png'
+        )
         assert first_figure_subfigures[0].caption == '(a) Feed-Forward Transformer'
-        assert first_figure_subfigures[3].image_src == '/html/1905.09263/assets/x4.png'
+        assert (
+            first_figure_subfigures[3].image_src
+            == 'https://ar5iv.labs.arxiv.org/html/1905.09263/assets/x4.png'
+        )
         assert first_figure_subfigures[3].caption == '(d) Duration Predictor'
 
     def test_parses_correct_equations(self, mock_example_paper):

@@ -11,7 +11,7 @@ import bs4
 import requests
 from bs4.element import NavigableString
 
-from paper_enrichment_agent.common import document_getter
+from paper_enrichment_agent.common import document_manipulators
 from paper_enrichment_agent.common.models import document as doc_models
 
 
@@ -20,6 +20,9 @@ class ArxivParser:
 
     The internal state of the parser is built during parsing, therefore a single instance of the
     parser should be used for parsing a single paper.
+
+    The parser raises `ParsingError` if it encounters an error during the parsing of the arXiv
+    paper.
     """
 
     _ALLOWED_SECTION_CLASSES = (
@@ -73,15 +76,23 @@ class ArxivParser:
 
         self._resolve_references(document)
 
+        # Fix the image sources to point to the ar5iv.labs.arxiv.org domain.
+        for image in document_manipulators.DocumentGetter(document).iter_components_of_type(
+            doc_models.ImgSubfigure
+        ):
+            image.image_src = f'https://ar5iv.labs.arxiv.org{image.image_src}'
+
         return document
 
     def _resolve_references(self, document: doc_models.Document) -> None:
         """Fixes the reference targets and types after having processed the document."""
 
-        doc_getter = document_getter.DocumentGetter(document)
+        doc_getter = document_manipulators.DocumentGetter(document)
 
         for reference in doc_getter.iter_components_of_type(doc_models.Reference):
             if reference.ref_type == 'element':
+                # Both internal and external links are represented as .ltx_ref. Links that do not
+                # reference an element id have to be treated as external links.
                 if not reference.target.startswith('#'):
                     reference.ref_type = 'link'
                     reference.description = 'External link reference'
@@ -89,6 +100,7 @@ class ArxivParser:
 
                 component_id = reference.target[1:]
 
+                # Links to subfigures are folded into the parent figure
                 if re.match(r'.+\.sf\d+$', component_id) or re.match(r'.+\.st\d+$', component_id):
                     component_id = '.'.join(component_id.split('.')[:-1])
 

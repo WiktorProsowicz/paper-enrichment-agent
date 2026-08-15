@@ -16,7 +16,14 @@ You realize that you are unlikely to grasp the topic fully without additional co
 
 ## Architecture
 
+### Use case diagram
+
+![Use case duagram](docs/use-case,drawio.png)
+
+### Component / Data flow diagram
+
 ![Architecture](docs/architecture.drawio.png)
+
 
 ## Changelog
 
