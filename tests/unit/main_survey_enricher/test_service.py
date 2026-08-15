@@ -433,7 +433,7 @@ class TestGetSurveyInfo:
 
         with pytest.raises(
             MainSurveyEnricherService.MainSurveyEnricherError,
-            match=f'Failed to retrieve information about the survey with ID',
+            match='Failed to retrieve information about the survey with ID',
         ):
             service.get_survey_info(survey_id=SAMPLE_SURVEY_ID)
 

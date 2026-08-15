@@ -24,7 +24,7 @@ def run_logging(script_content: str, log_file_path: pathlib.Path) -> dict:
         stderr=subprocess.PIPE,
     )
 
-    with open(log_file_path, 'r', encoding='utf-8') as log_file:
+    with open(log_file_path, encoding='utf-8') as log_file:
         return {
             'file_log_objects': [json.loads(line) for line in log_file.read().strip().splitlines()],
             'process_log_lines': [
