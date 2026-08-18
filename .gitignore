@@ -8,3 +8,4 @@
 test_results/
 .coverage
 src/paper_enrichment_agent.egg-info/
+outputs/
