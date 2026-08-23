@@ -1,8 +1,10 @@
 """Utilities for managing setup/teardown lifecycle of footnote enrichment tools."""
 
+import dataclasses
+import difflib
+import itertools
 from collections.abc import Generator
 from contextlib import contextmanager
-import difflib
 
 import fastmcp
 
@@ -17,9 +19,26 @@ class EnrichmentTools:
     1. The context built from the reference document, which is used to provide content for footnote
     enrichment.
     2. The state of the built footnote, modified by the enrichment agent.
+
+    The agent using the enrichment tools is by design not expected to know the full structure of
+    the document, down to the furthest leaf in the tree. This applies especially to paragraphs,
+    which typically contain multiple elements and should be therefore rendered as continuous text.
+
     """
 
     type DocumentTree = str | list[DocumentTree] | dict[str, DocumentTree]
+
+    @dataclasses.dataclass
+    class _StringifiedParagraphElement:
+        """An element of the paragraph, rendered as a string.
+
+        Attributes:
+            doc_component: The component from the original document.
+            str_content: The stringified content of the element.
+        """
+
+        doc_component: doc_models.Paragraph.InlineParagraphElement | None
+        str_content: str
 
     def __init__(self, reference_document: doc_models.Document) -> None:
 
@@ -73,11 +92,18 @@ class EnrichmentTools:
             path_to_paragraph: The path to the paragraph in the reference document.
 
         Returns:
-            The textual content of the paragraph.
+            The textual content of the paragraph, composed from its elements, such as references,
+            links, text fragments etc. Note that the content is rendered the way a human would see
+            it on paper, i.e. with no markup or formatting metadata. Therefore, if the text refers
+            to an element, e.g. a figure, its placement should be inferred from the context, e.g.
+            "as shown in Figure 3.2" suggests the figure should be placed in the subsection 2 of
+            the section 3.
         """
 
         paragraph = self._obtain_paragraph(path_to_paragraph)
-        return paragraph.elements[0]  # type: ignore
+        stringified_elements = self._stringify_paragraph_elements(paragraph)
+
+        return ''.join(e.str_content for e in stringified_elements)
 
     def get_figure_details(self, path_to_figure: str) -> str:
         """Returns the details describing a given figure in the reference document.
@@ -121,15 +147,30 @@ class EnrichmentTools:
         referenced document, yet they reduce the amount of content that has to be read to
         understand the described content.
 
-        Both the begin and end anchors should ideally span several words to avoid ambiguity.
+        Both the begin and end anchors should ideally span several words to avoid ambiguity. Also,
+        the anchors should be chosen to match the text exactly, including punctuation
+        and whitespace.
 
         Args:
             path_to_paragraph: The path to the paragraph in the reference document.
             begin_anchor: The beginning text anchor of the citation to be extracted.
             end_anchor: The ending text anchor of the citation to be extracted.
+
+        Example:
+            paragraph content: "The two most commonly used attention functions are additive
+                attention [2], and dot-product (multiplicative) attention. Dot-product attention is
+                identical to our algorithm, except for the scaling factor of $1 / sqrt(d)$. Additive
+                attention computes the compatibility function using a feed-forward network with a
+                single hidden layer."
+            begin anchor: "Dot-product attention is"
+            end anchor: "scaling factor of $1 / sqrt(d)$."
+            returned citation: "Dot-product attention is identical to our algorithm, except for the
+                scaling factor of $1 / sqrt(d)$."
         """
 
-        paragraph_content: str = self._obtain_paragraph(path_to_paragraph).elements[0]  # type: ignore
+        paragraph = self._obtain_paragraph(path_to_paragraph)
+        str_elements = self._stringify_paragraph_elements(paragraph)
+        paragraph_content = ''.join(e.str_content for e in str_elements)
 
         match_begin = difflib.SequenceMatcher(
             None, paragraph_content, begin_anchor
@@ -145,9 +186,39 @@ class EnrichmentTools:
         if match_end.size != len(end_anchor):
             raise ValueError('End anchor not found in paragraph content.')
 
-        citation = paragraph_content[match_begin.a + match_begin.size : match_end.a]
+        citation_elements: list[doc_models.Paragraph.InlineParagraphElement] = []
 
-        self._footnote.components.append(doc_models.Paragraph(elements=[citation]))
+        for start_idx, element in zip(
+            itertools.accumulate((len(e.str_content) for e in str_elements), initial=0),
+            str_elements,
+            strict=False,
+        ):
+            end_idx = start_idx + len(element.str_content)
+
+            if match_begin.a >= end_idx or match_end.a + match_end.size <= start_idx:
+                continue
+
+            if element.doc_component is not None:
+                citation_elements.append(element.doc_component)
+                continue
+
+            citation_elements.append(
+                element.str_content[
+                    max(0, match_begin.a - start_idx) : match_end.a + match_end.size - start_idx
+                ]
+            )
+
+        citation_paragraph = doc_models.Paragraph(elements=[])
+
+        for is_string_sequence, elements in itertools.groupby(
+            citation_elements, key=lambda e: isinstance(e, str)
+        ):
+            if is_string_sequence:
+                citation_paragraph.elements.append(''.join(elements))  # type: ignore[arg-type]
+            else:
+                citation_paragraph.elements.extend(elements)
+
+        self._footnote.components.append(citation_paragraph)
 
     def extract_figure(self, path_to_figure: str, subfigures_ids: list[str] | None) -> None:
         """Extracts a figure from the reference document and adds it to the footnote.
@@ -233,6 +304,52 @@ class EnrichmentTools:
             }
 
         return base_repr
+
+    def _stringify_paragraph_elements(
+        self, paragraph: doc_models.Paragraph
+    ) -> list[_StringifiedParagraphElement]:
+        """Converts the elements of a paragraph into a list of stringified elements."""
+
+        str_elements: list[EnrichmentTools._StringifiedParagraphElement] = []
+
+        def is_citation(element: doc_models.Paragraph.InlineParagraphElement) -> bool:
+            return isinstance(element, doc_models.Reference) and element.ref_type == 'citation'
+
+        for is_sequence_of_citations, elements in itertools.groupby(
+            paragraph.elements, key=is_citation
+        ):
+            if is_sequence_of_citations:
+                str_elements.append(
+                    EnrichmentTools._StringifiedParagraphElement(
+                        str_content='[' + ', '.join(e.content_text for e in elements) + ']',  # type: ignore[union-attr]
+                        doc_component=None,
+                    )
+                )
+            else:
+                for element in elements:
+                    if isinstance(element, doc_models.MathExpression):
+                        str_elements.append(
+                            EnrichmentTools._StringifiedParagraphElement(
+                                str_content=f'${element.expression}$', doc_component=element
+                            )
+                        )
+
+                    elif isinstance(element, doc_models.Reference):
+                        str_elements.append(
+                            EnrichmentTools._StringifiedParagraphElement(
+                                str_content=element.content_text,
+                                doc_component=element if element.ref_type == 'link' else None,
+                            )
+                        )
+
+                    else:
+                        str_elements.append(
+                            EnrichmentTools._StringifiedParagraphElement(
+                                str_content=element, doc_component=None
+                            )
+                        )
+
+        return str_elements
 
 
 class EnrichmentContextManager:
