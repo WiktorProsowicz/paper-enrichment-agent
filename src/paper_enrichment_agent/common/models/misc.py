@@ -6,6 +6,8 @@ from typing import Annotated
 import pydantic
 from pydantic import Field
 
+from paper_enrichment_agent.common.models import document as doc_models
+
 
 class DocumentMetadata(pydantic.BaseModel):
     """Represents the metadata of a document being in the system.
@@ -45,4 +47,48 @@ class SurveyMetadata(pydantic.BaseModel):
                 ' and the value is the `paper_id` of the referenced document.'
             )
         ),
+    ]
+
+
+class FootnoteEnrichmentRequest(pydantic.BaseModel):
+    """Contains request data for the footnote enrichment agent.
+
+    The request data includes the context needed to convert a reference that explains the
+    contribution of a document into the survey that references it. The enriched footnote is
+    expected to be composed of excerpts from the referenced document, crucial for the exact context
+    of the citation.
+    """
+
+    session_id: str = Field(
+        description='The session ID of the enrichment request.',
+        default_factory=lambda: uuid.uuid4().hex,
+    )
+
+    survey_title: Annotated[
+        str, Field(description='The title of the survey that references the document.')
+    ]
+
+    survey_abstract: Annotated[
+        str, Field(description='The abstract of the survey that references the document.')
+    ]
+
+    reference_document: Annotated[
+        doc_models.Document, Field(description='The document referenced by the survey.')
+    ]
+
+    reference_document_title: Annotated[
+        str, Field(description='The title of the document referenced by the survey.')
+    ]
+
+    reference_document_abstract: Annotated[
+        str, Field(description='The abstract of the document referenced by the survey.')
+    ]
+
+    reference: Annotated[
+        doc_models.Reference, Field(description='The reference to the document in the survey.')
+    ]
+
+    referencing_paragraph: Annotated[
+        doc_models.Paragraph,
+        Field(description='The paragraph in the survey that references the document.'),
     ]

@@ -1,4 +1,9 @@
-"""Utilities for managing setup/teardown lifecycle of footnote enrichment tools."""
+"""Utilities for managing setup/teardown lifecycle of footnote enrichment tools.
+
+Exported classes:
+    EnrichmentTools: Represents the state of a single footnote-enrichment session.
+    EnrichmentContextManager: Manages the setup and teardown of the footnote-enrichment tools state.
+"""
 
 import dataclasses
 import difflib
@@ -7,6 +12,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 
 import fastmcp
+from starlette.applications import Starlette
 
 from paper_enrichment_agent.common import document_manipulators
 from paper_enrichment_agent.common.models import document as doc_models
@@ -366,10 +372,10 @@ class EnrichmentContextManager:
     def __init__(self) -> None:
 
         self._tools_states: dict[str, EnrichmentTools] = {}
-        self._mcp_endpoints: dict[str, fastmcp.FastMCP] = {}
+        self._mcp_endpoints: dict[str, Starlette] = {}
 
-    def get_mcp_for_agent_session(self, session_id: str) -> fastmcp.FastMCP:
-        """Returns the MCP endpoint for a footnote-enrichment agent session.
+    def get_mcp_app_for_agent_session(self, session_id: str) -> Starlette:
+        """Returns the MCP app for a footnote-enrichment agent session.
 
         Args:
             session_id: The unique identifier of the footnote-enrichment agent session.
@@ -421,7 +427,7 @@ class EnrichmentContextManager:
         mcp_endpoint.tool(tools_state.extract_paragraph_citation, name='extract_paragraph_citation')
         mcp_endpoint.tool(tools_state.extract_figure, name='extract_figure')
 
-        self._mcp_endpoints[session_id] = mcp_endpoint
+        self._mcp_endpoints[session_id] = mcp_endpoint.http_app()
 
         yield
 

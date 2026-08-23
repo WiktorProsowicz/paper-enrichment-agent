@@ -9,7 +9,13 @@ and compose them into a footnote, which thoroughly explains the document's contr
 import time
 from functools import cache
 
+import pydantic
+from prometheus_client import Counter, Summary
+
 from paper_enrichment_agent.common import logging_setup
+from paper_enrichment_agent.common.models import document as doc_models
+from paper_enrichment_agent.common.models.misc import FootnoteEnrichmentRequest
+from paper_enrichment_agent.footnote_enrichment_agent.components import enrichment_context
 
 
 @cache
@@ -23,7 +29,71 @@ class FootnoteEnrichmentAgentService:
     class FootnoteEnrichmentAgentError(Exception):
         """Base class for exceptions raised by the `footnote_enrichment_agent` service."""
 
-    def __init__(self) -> None:
-        pass
+    def __init__(
+        self,
+        metrics: 'Metrics',
+        enrichment_context_manager: enrichment_context.EnrichmentContextManager,
+    ) -> None:
+        self._metrics = metrics
+        self._enrichment_context_manager = enrichment_context_manager
 
-    # def
+    async def reference_to_footnote(self, request: FootnoteEnrichmentRequest) -> doc_models.Section:
+        """Calls the footnote enrichment agent to compose a footnote from the given document.
+
+        Args:
+            request: The footnote enrichment request data.
+        """
+
+        try:
+            with self._enrichment_context_manager.setup_mcp_for_agent_session(
+                request.session_id, request.reference_document
+            ):
+                start_time = time.perf_counter()
+                footnote = doc_models.Section(title='', components=[])
+                end_time = time.perf_counter()
+
+                self._metrics.enrichment_time.observe(end_time - start_time)
+                self._metrics.enrichment_requests.labels(status='success').inc()
+
+                _logger().info(
+                    'Successfully enriched footnote for agent session',
+                    session_id=request.session_id,
+                    survey_title=request.survey_title,
+                    reference_document_title=request.reference_document_title,
+                )
+
+                return footnote
+
+        except enrichment_context.EnrichmentContextManager.EnrichmentContextManagerError as e:
+            self._metrics.enrichment_requests.labels(status='failure').inc()
+            _logger().error('Failed to set up enrichment context for agent session', error=str(e))
+
+            raise self.FootnoteEnrichmentAgentError(
+                'Failed to set up enrichment context for agent session'
+            ) from e
+
+
+class Metrics:
+    """Metrics for the `footnote_enrichment_agent` service."""
+
+    def __init__(self) -> None:
+
+        self.enrichment_requests = Counter(
+            'enrichment_requests',
+            'Number of footnote enrichment requests received by the system.',
+            namespace='footnote_enrichment_agent',
+            labelnames=['status'],  # status can be 'success' or 'failure'
+        )
+
+        self.improvement_requests = Counter(
+            'improvement_requests',
+            'Number of footnote improvement requests received by the system.',
+            namespace='footnote_enrichment_agent',
+            labelnames=['status'],  # status can be 'success' or 'failure'
+        )
+
+        self.enrichment_time = Summary(
+            'enrichment_time',
+            'Time spent on successful footnote enrichment requests.',
+            namespace='footnote_enrichment_agent',
+        )
