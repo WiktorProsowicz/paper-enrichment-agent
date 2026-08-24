@@ -391,7 +391,7 @@ class EnrichmentContextManager:
     @contextmanager
     def setup_mcp_for_agent_session(
         self, session_id: str, reference_document: doc_models.Document | None
-    ) -> Generator[None, None, None]:
+    ) -> Generator[EnrichmentTools, None, None]:
         """Sets up a child MCP endpoint for a footnote-enrichment agent session.
 
         The exposed MCP is attached to the primary MCP root endpoint and delegates the
@@ -429,6 +429,6 @@ class EnrichmentContextManager:
 
         self._mcp_endpoints[session_id] = mcp_endpoint.http_app()
 
-        yield
+        yield tools_state
 
         self._mcp_endpoints.pop(session_id)

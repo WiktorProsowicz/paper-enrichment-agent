@@ -9,13 +9,15 @@ and compose them into a footnote, which thoroughly explains the document's contr
 import time
 from functools import cache
 
-import pydantic
 from prometheus_client import Counter, Summary
 
 from paper_enrichment_agent.common import logging_setup
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models.misc import FootnoteEnrichmentRequest
 from paper_enrichment_agent.footnote_enrichment_agent.components import enrichment_context
+from paper_enrichment_agent.footnote_enrichment_agent.components.agent import (
+    FootnoteEnrichmentAgent,
+)
 
 
 @cache
@@ -33,9 +35,11 @@ class FootnoteEnrichmentAgentService:
         self,
         metrics: 'Metrics',
         enrichment_context_manager: enrichment_context.EnrichmentContextManager,
+        enrichment_agent: FootnoteEnrichmentAgent,
     ) -> None:
         self._metrics = metrics
         self._enrichment_context_manager = enrichment_context_manager
+        self._enrichment_agent = enrichment_agent
 
     async def reference_to_footnote(self, request: FootnoteEnrichmentRequest) -> doc_models.Section:
         """Calls the footnote enrichment agent to compose a footnote from the given document.
@@ -47,9 +51,9 @@ class FootnoteEnrichmentAgentService:
         try:
             with self._enrichment_context_manager.setup_mcp_for_agent_session(
                 request.session_id, request.reference_document
-            ):
+            ) as enrichment_tools:
                 start_time = time.perf_counter()
-                footnote = doc_models.Section(title='', components=[])
+                footnote = await self._enrichment_agent.invoke(request, enrichment_tools)
                 end_time = time.perf_counter()
 
                 self._metrics.enrichment_time.observe(end_time - start_time)
