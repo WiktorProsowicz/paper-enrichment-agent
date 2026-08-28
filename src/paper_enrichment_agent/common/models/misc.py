@@ -55,8 +55,8 @@ class FootnoteEnrichmentRequest(pydantic.BaseModel):
 
     The request data includes the context needed to convert a reference that explains the
     contribution of a document into the survey that references it. The enriched footnote is
-    expected to be composed of excerpts from the referenced document, crucial for the exact context
-    of the citation.
+    expected to be composed from excerpts taken from the referenced document, crucial for the exact
+    context of the citation.
     """
 
     session_id: str = Field(
@@ -80,15 +80,21 @@ class FootnoteEnrichmentRequest(pydantic.BaseModel):
         str, Field(description='The title of the document referenced by the survey.')
     ]
 
-    reference_document_abstract: Annotated[
-        str, Field(description='The abstract of the document referenced by the survey.')
-    ]
-
-    reference: Annotated[
-        doc_models.Reference, Field(description='The reference to the document in the survey.')
+    reference_id: Annotated[
+        str, Field(description='The component_id of the reference to the document in the survey.')
     ]
 
     referencing_paragraph: Annotated[
         doc_models.Paragraph,
         Field(description='The paragraph in the survey that references the document.'),
+    ]
+
+    citation_context_info: Annotated[
+        str,
+        Field(
+            description=(
+                'Additional context information explaining the citation, e.g. info about'
+                'the section it comes from.'
+            )
+        ),
     ]
