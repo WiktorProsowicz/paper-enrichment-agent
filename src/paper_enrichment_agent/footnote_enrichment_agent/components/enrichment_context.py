@@ -16,6 +16,7 @@ from starlette.applications import Starlette
 
 from paper_enrichment_agent.common import document_manipulators
 from paper_enrichment_agent.common.models import document as doc_models
+from paper_enrichment_agent.footnote_enrichment_agent.components import doc_utils
 
 
 class EnrichmentTools:
@@ -33,18 +34,6 @@ class EnrichmentTools:
     """
 
     type DocumentTree = str | list[DocumentTree] | dict[str, DocumentTree]
-
-    @dataclasses.dataclass
-    class _StringifiedParagraphElement:
-        """An element of the paragraph, rendered as a string.
-
-        Attributes:
-            doc_component: The component from the original document.
-            str_content: The stringified content of the element.
-        """
-
-        doc_component: doc_models.Paragraph.InlineParagraphElement | None
-        str_content: str
 
     def __init__(self, reference_document: doc_models.Document) -> None:
 
@@ -107,7 +96,7 @@ class EnrichmentTools:
         """
 
         paragraph = self._obtain_paragraph(path_to_paragraph)
-        stringified_elements = self._stringify_paragraph_elements(paragraph)
+        stringified_elements = doc_utils.stringify_paragraph_elements(paragraph)
 
         return ''.join(e.str_content for e in stringified_elements)
 
@@ -175,7 +164,7 @@ class EnrichmentTools:
         """
 
         paragraph = self._obtain_paragraph(path_to_paragraph)
-        str_elements = self._stringify_paragraph_elements(paragraph)
+        str_elements = doc_utils.stringify_paragraph_elements(paragraph)
         paragraph_content = ''.join(e.str_content for e in str_elements)
 
         match_begin = difflib.SequenceMatcher(
@@ -194,13 +183,7 @@ class EnrichmentTools:
 
         citation_elements: list[doc_models.Paragraph.InlineParagraphElement] = []
 
-        for start_idx, element in zip(
-            itertools.accumulate((len(e.str_content) for e in str_elements), initial=0),
-            str_elements,
-            strict=False,
-        ):
-            end_idx = start_idx + len(element.str_content)
-
+        for start_idx, end_idx, element in doc_utils.iter_str_elements_boundaries(str_elements):
             if match_begin.a >= end_idx or match_end.a + match_end.size <= start_idx:
                 continue
 
@@ -310,52 +293,6 @@ class EnrichmentTools:
             }
 
         return base_repr
-
-    def _stringify_paragraph_elements(
-        self, paragraph: doc_models.Paragraph
-    ) -> list[_StringifiedParagraphElement]:
-        """Converts the elements of a paragraph into a list of stringified elements."""
-
-        str_elements: list[EnrichmentTools._StringifiedParagraphElement] = []
-
-        def is_citation(element: doc_models.Paragraph.InlineParagraphElement) -> bool:
-            return isinstance(element, doc_models.Reference) and element.ref_type == 'citation'
-
-        for is_sequence_of_citations, elements in itertools.groupby(
-            paragraph.elements, key=is_citation
-        ):
-            if is_sequence_of_citations:
-                str_elements.append(
-                    EnrichmentTools._StringifiedParagraphElement(
-                        str_content='[' + ', '.join(e.content_text for e in elements) + ']',  # type: ignore[union-attr]
-                        doc_component=None,
-                    )
-                )
-            else:
-                for element in elements:
-                    if isinstance(element, doc_models.MathExpression):
-                        str_elements.append(
-                            EnrichmentTools._StringifiedParagraphElement(
-                                str_content=f'${element.expression}$', doc_component=element
-                            )
-                        )
-
-                    elif isinstance(element, doc_models.Reference):
-                        str_elements.append(
-                            EnrichmentTools._StringifiedParagraphElement(
-                                str_content=element.content_text,
-                                doc_component=element if element.ref_type == 'link' else None,
-                            )
-                        )
-
-                    else:
-                        str_elements.append(
-                            EnrichmentTools._StringifiedParagraphElement(
-                                str_content=element, doc_component=None
-                            )
-                        )
-
-        return str_elements
 
 
 class EnrichmentContextManager:
