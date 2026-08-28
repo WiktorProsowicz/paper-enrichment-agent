@@ -203,6 +203,22 @@ class TestDocumentGetter:
         with pytest.raises(ValueError):
             getter.get_component_by_path('/non_existent/path')
 
+    def test_get_components_on_path(self, sample_document, expected_paths):
+        getter = DocumentGetter(sample_document)
+
+        components = getter.get_components_on_path('/sections/section_2/list_1/list_item_2')
+
+        assert len(components) == 3
+        assert isinstance(components[0], doc_models.Section)
+        assert isinstance(components[1], doc_models.List)
+        assert isinstance(components[2], doc_models.Paragraph)
+
+        components = getter.get_components_on_path('/footnotes/footnote_2/math_expr')
+
+        assert len(components) == 2
+        assert isinstance(components[0], doc_models.Section)
+        assert isinstance(components[1], doc_models.MathExpression)
+
 
 class TestDocumentSetter:
     def test_remove_component_with_path(self, sample_document):

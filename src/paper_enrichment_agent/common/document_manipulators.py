@@ -3,7 +3,7 @@
 See :class:`~paper_enrichment_agent.common.models.document.Document` for the document structure.
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 
 from paper_enrichment_agent.common.models import document as doc_models
 
@@ -70,6 +70,32 @@ class DocumentGetter:
             for _, component in _iter_component(footnote, root_path='/footnotes'):
                 if isinstance(component, component_type):
                     yield component
+
+    def get_components_on_path(self, target_path: str) -> list[doc_models.DocumentComponent]:
+        """Returns all components on the specified path in the document.
+
+        Raises:
+            ValueError: If the component with the specified path is not found in the document.
+        """
+
+        try:
+            _ = self.get_component_by_path(target_path)
+        except ValueError as err:
+            raise ValueError(f'Component not found in the document: {target_path}') from err
+
+        if target_path.startswith('/sections'):
+            root_components: Sequence[doc_models.DocumentComponent] = self._document.sections
+            root_path = '/sections'
+        else:
+            root_components = self._document.footnotes
+            root_path = '/footnotes'
+
+        return [
+            component
+            for root_component in root_components
+            for path, component in _iter_component(root_component, root_path=root_path)
+            if target_path.startswith(path)
+        ]
 
 
 class DocumentSetter:
