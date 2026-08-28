@@ -6,21 +6,28 @@ communication.
 
 import functools
 import pathlib
-from typing import Annotated
+from typing import Annotated, Any
 
 import fastapi
 import hydra
 import omegaconf
 import pydantic
+import uvicorn
+from langchain_litellm import ChatLiteLLM
 from pydantic import Field
 from starlette.types import Receive, Scope, Send
 
 from paper_enrichment_agent.common import logging_setup
-from paper_enrichment_agent.common.models import misc as misc_models
 from paper_enrichment_agent.common.models import document as doc_models
+from paper_enrichment_agent.common.models import misc as misc_models
 from paper_enrichment_agent.footnote_enrichment_agent.components import enrichment_context
-from paper_enrichment_agent.footnote_enrichment_agent.service import FootnoteEnrichmentAgentService
-from paper_enrichment_agent.footnote_enrichment_agent.service import Metrics
+from paper_enrichment_agent.footnote_enrichment_agent.components.agent import (
+    FootnoteEnrichmentAgent,
+)
+from paper_enrichment_agent.footnote_enrichment_agent.service import (
+    FootnoteEnrichmentAgentService,
+    Metrics,
+)
 
 
 @functools.cache
@@ -35,30 +42,52 @@ class AppCfg(pydantic.BaseModel):
         pathlib.Path, Field(description='Output path for storing json log events.')
     ]
 
+    app_port: Annotated[int, Field(description='The port on which the FastAPI app will run.')]
 
-@hydra.main(version_base=None, config_path='cfg', config_name='main')
-def main(hydra_cfg: omegaconf.DictConfig) -> None:
-    """Main entrypoint of the application."""
+    agent_cfg: Annotated[
+        FootnoteEnrichmentAgent.Configuration,
+        Field(description='Configuration of the footnote enrichment agent.'),
+    ]
 
-    app_cfg = AppCfg.model_validate(omegaconf.OmegaConf.to_container(hydra_cfg))
+    agent_llm_model: Annotated[
+        str,
+        Field(
+            description=(
+                'The LiteLLM-supported model signature of the LLM used by the footnote'
+                'enrichment agent.'
+            )
+        ),
+    ]
 
-    logging_setup.setup_logging(app_cfg.json_logs_path)
+    agent_llm_params: Annotated[
+        dict[str, Any],
+        Field(
+            description=(
+                'The model-specific parameters of the LLM used by the footnote '
+                'enrichment agent. The params are passed to the LiteLLM constructor.'
+            )
+        ),
+    ]
 
-    _logger().info('Running paper_enrichment_agent service', cfg=app_cfg)
+    llm_api_key: Annotated[
+        str,
+        Field(description='The API key for the LLM used by the footnote enrichment agent'),
+    ]
 
-    enrichment_context_manager = enrichment_context.EnrichmentContextManager()
-    service = FootnoteEnrichmentAgentService(
-        metrics=Metrics(),
-        enrichment_context_manager=enrichment_context_manager,
-    )
 
-    api = fastapi.FastAPI(title='Footnote Enrichment Agent')
+def create_app(
+    service: FootnoteEnrichmentAgentService,
+    enrichment_context_manager: enrichment_context.EnrichmentContextManager,
+) -> fastapi.FastAPI:
+    """Creates a FastAPI application for the `footnote_enrichment_agent` service."""
 
-    @api.get('/health')
+    app = fastapi.FastAPI(title='Footnote Enrichment Agent')
+
+    @app.get('/health')
     async def health() -> dict[str, str]:
         return {'status': 'ok'}
 
-    @api.post('/reference_to_footnote')
+    @app.post('/reference_to_footnote')
     async def reference_to_footnote(
         request: misc_models.FootnoteEnrichmentRequest,
     ) -> doc_models.Section:
@@ -71,13 +100,50 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
 
         await mcp_endpoint(scope, receive, send)
 
-    api.router.routes.append(
+    app.router.routes.append(
         fastapi.routing.APIRoute(
             path='/mcp/{session_id:path}',
             endpoint=mcp_dispatch,
             methods=['GET', 'POST'],
         )
     )
+
+    return app
+
+
+@hydra.main(version_base=None, config_path='cfg', config_name='main')
+def main(hydra_cfg: omegaconf.DictConfig) -> None:
+    """Main entrypoint of the application."""
+
+    app_cfg = AppCfg.model_validate(omegaconf.OmegaConf.to_container(hydra_cfg))
+
+    logging_setup.setup_logging(app_cfg.json_logs_path)
+
+    _logger().info('Running paper_enrichment_agent service', cfg=app_cfg)
+
+    enrichment_context_manager = enrichment_context.EnrichmentContextManager()
+
+    enrichment_agent = FootnoteEnrichmentAgent(
+        llm=ChatLiteLLM(
+            name=app_cfg.agent_llm_model, api_key=app_cfg.llm_api_key, **app_cfg.agent_llm_params
+        ),
+        cfg=FootnoteEnrichmentAgent.Configuration.model_validate(
+            omegaconf.OmegaConf.to_container(hydra_cfg.agent)
+        ),
+    )
+
+    service = FootnoteEnrichmentAgentService(
+        metrics=Metrics(),
+        enrichment_context_manager=enrichment_context_manager,
+        enrichment_agent=enrichment_agent,
+    )
+
+    app = create_app(
+        service=service,
+        enrichment_context_manager=enrichment_context_manager,
+    )
+
+    uvicorn.run(app, host='0.0.0.0', port=app_cfg.app_port)
 
 
 if __name__ == '__main__':

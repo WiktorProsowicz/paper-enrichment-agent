@@ -1,1 +1,13 @@
 json_logs_path: /tmp/output_logs.jsonl
+
+app_port: 8081
+
+agent_cfg:
+  citation_context_chars: 400
+
+agent_llm_model: "groq/llama-3.3-70b-versatile"
+
+agent_llm_params:
+  temperature: 0.7
+
+llm_api_key: "YOUR_LLM_API_KEY"
