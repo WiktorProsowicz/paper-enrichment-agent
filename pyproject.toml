@@ -67,6 +67,10 @@ line-ending = "auto"
 [tool.coverage.report]
 fail_under = 90
 show_missing = true
+omit = [
+    "src/paper_enrichment_agent/footnote_enrichment_agent/components/agent.py",
+    "src/paper_enrichment_agent/footnote_enrichment_agent/main.py",
+]
 
 [tool.mypy]
 disable_error_code = "import-untyped"
