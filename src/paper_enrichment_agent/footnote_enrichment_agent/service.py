@@ -14,9 +14,11 @@ from prometheus_client import Counter, Summary
 from paper_enrichment_agent.common import logging_setup
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models.misc import FootnoteEnrichmentRequest
-from paper_enrichment_agent.footnote_enrichment_agent.components import enrichment_context
 from paper_enrichment_agent.footnote_enrichment_agent.components.agent import (
     FootnoteEnrichmentAgent,
+)
+from paper_enrichment_agent.footnote_enrichment_agent.components.enrichment_context import (
+    EnrichmentContextManager,
 )
 
 
@@ -34,7 +36,7 @@ class FootnoteEnrichmentAgentService:
     def __init__(
         self,
         metrics: 'Metrics',
-        enrichment_context_manager: enrichment_context.EnrichmentContextManager,
+        enrichment_context_manager: EnrichmentContextManager,
         enrichment_agent: FootnoteEnrichmentAgent,
     ) -> None:
         self._metrics = metrics
@@ -68,7 +70,7 @@ class FootnoteEnrichmentAgentService:
 
                 return footnote
 
-        except enrichment_context.EnrichmentContextManager.EnrichmentContextManagerError as e:
+        except EnrichmentContextManager.EnrichmentContextManagerError as e:
             self._metrics.enrichment_requests.labels(status='failure').inc()
             _logger().error('Failed to set up enrichment context for agent session', error=str(e))
 
