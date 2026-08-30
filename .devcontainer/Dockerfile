@@ -20,4 +20,4 @@ RUN usermod -aG sudo "ubuntu" && \
 USER ubuntu
 WORKDIR /home/ubuntu/workspace
 
-RUN wget -qO- https://astral.sh/uv/install.sh | sh
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
