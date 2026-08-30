@@ -1,0 +1,23 @@
+name: llm-eval
+
+services:
+  footnote_enrichment_agent:
+    build:
+      dockerfile: infrastructure/app-base.Dockerfile
+      context: ..
+    restart: no
+    command:
+      [
+        "uv", "run", "python", "-m", "paper_enrichment_agent.footnote_enrichment_agent.main",
+        "llm_api_key=${LLM_API_KEY}",
+      ]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - paper-enrichment-agent-network
+
+networks:
+  paper-enrichment-agent-network:

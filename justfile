@@ -32,3 +32,24 @@ run_unit_tests:
 
     @echo "Reporting coverage..."
     uv run coverage report
+
+setup_mlflow_server:
+    @echo "Setting up MLflow server..."
+    export $(cat mlflow.env | xargs)
+    docker compose -f infrastructure/mlflow-server.yaml up -d
+
+setup_mlflow_server_clean:
+    #!/usr/bin/env bash
+    echo "Cleaning up MLflow server..."
+    export $(cat mlflow.env | xargs)
+
+    docker compose -f infrastructure/mlflow-server.yaml down
+    docker volume rm -f mlflow-server_mlflow-postgres-data mlflow-server_mlflow-artifacts
+    docker compose -f infrastructure/mlflow-server.yaml up --build -d
+
+run_llm_eval:
+    #!/usr/bin/env bash
+    echo "Cleaning up MLflow server..."
+    export $(cat app.env | xargs)
+
+    docker compose -f infrastructure/llm-eval.yaml up --attach llm-eval_eval_runner
