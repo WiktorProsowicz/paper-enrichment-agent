@@ -2,8 +2,12 @@ json_logs_path: /tmp/output_logs.jsonl
 
 app_port: 8081
 
+mlflow_cfg:
+  tracking_uri: "http://mlflow:5000"
+
 agent_cfg:
   citation_context_chars: 400
+  mcp_server_url_base: "http://localhost:8081/mcp"
 
 agent_llm_model: "groq/llama-3.3-70b-versatile"
 
