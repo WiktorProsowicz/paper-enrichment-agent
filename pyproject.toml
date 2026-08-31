@@ -56,7 +56,7 @@ select = [
     "SIM", # simplifications
 ]
 ignore = ["W191"]
-exclude = ["tests"]
+exclude = ["tests/unit"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -80,4 +80,7 @@ omit = [
 [tool.mypy]
 disable_error_code = "import-untyped"
 strict = true
-exclude = ["tests"]
+exclude = ["tests/unit"]
+
+[tool.pytest.ini_options]
+addopts = ["-p", "mlflow.pytest.plugin"]
