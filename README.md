@@ -18,12 +18,47 @@ You realize that you are unlikely to grasp the topic fully without additional co
 
 ### Use case diagram
 
-![Use case duagram](docs/use-case,drawio.png)
+![Use case diagram](docs/use-case.drawio.png)
 
 ### Component / Data flow diagram
 
 ![Architecture](docs/architecture.drawio.png)
 
+## Evaluation
+
+### Footnote Enrichment Agent
+
+### Eval setup
+
+The evaluation is based on `mlflow` and its `pytest` plugin. The module hierarchy of the evaluation code is shown below: 
+
+```yaml
+tests/llm_eval:
+    # Per-test-suite setup, including the definition of data samples, test cases and scorers.
+    suites:
+        test_footnote_enrichment:
+            # Suite-specific setup - defines at least the experiment name.
+            conftest.py
+            # 
+            data.py
+            # Defines particular evaluators of the traces produced for each data sample.
+            # This is the place where the LLM Judges should be placed as well.
+            scorers.py
+            # Defines the test cases - including the Judge LLM calibration.
+            test_footnote_enrichment.py
+        ...
+# Configuration of the entire evaluation pipeline - should contain per-suite configuration and global config, such as MLFlow
+# server URI, Judge LLM parameters etc.
+cfg.yaml
+# Global evaluation setup - the module docstring defines how each test suite should be structured.
+conftest.py
+# Core evaluation utilities.
+core.py
+# Entrypoint script that loads config and runs evaluation.
+run_eval.py
+```
+
+A single suite is supposed to correspond with a single MLFlow experiment. A single process run is meant to correspond with a single MLFlow run, therefore only one suite is allowed to be run at once. 
 
 ## Changelog
 

@@ -1,0 +1,7 @@
+mlflow_tracking_uri: "http://localhost:5000"
+experiment_prefix: llm_eval
+active_suites: [
+  'test_footnote_enrichment'
+]
+suite_configs:
+  test_footnote_enrichment: {}
