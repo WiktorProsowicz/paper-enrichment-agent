@@ -4,6 +4,7 @@ See :class:`~paper_enrichment_agent.common.models.document.Document`. The arXiv 
 from their html format using the ar5iv.labs.arxiv.org/html/[id] endpoint.
 """
 
+import itertools
 import re
 from typing import cast
 
@@ -76,6 +77,8 @@ class ArxivParser:
 
         self._resolve_references(document)
 
+        self._merge_consecutive_strings_in_paragraphs(document)
+
         # Fix the image sources to point to the ar5iv.labs.arxiv.org domain.
         for image in document_manipulators.DocumentGetter(document).iter_components_of_type(
             doc_models.ImgSubfigure
@@ -118,6 +121,24 @@ class ArxivParser:
                     f'Failed to resolve citation reference target with ID "{reference.target}".'
                 )
 
+    def _merge_consecutive_strings_in_paragraphs(self, document: doc_models.Document) -> None:
+        """Merges consecutive str elements in paragraphs into a single str element."""
+
+        doc_getter = document_manipulators.DocumentGetter(document)
+
+        for paragraph in doc_getter.iter_components_of_type(doc_models.Paragraph):
+            new_elements: list[doc_models.Paragraph.InlineParagraphElement] = []
+
+            for is_sequence_of_strings, elements in itertools.groupby(
+                paragraph.elements, key=lambda e: isinstance(e, str)
+            ):
+                if is_sequence_of_strings:
+                    new_elements.append(''.join(elements))  # type: ignore[arg-type]
+                else:
+                    new_elements.extend(elements)
+
+            paragraph.elements = new_elements
+
     def _decode_section(self, section_tag: bs4.Tag) -> doc_models.Section:
         """Decodes a section from the arXiv paper.
 
@@ -147,11 +168,18 @@ class ArxivParser:
                         components.append(equation)
 
                     elif 'ltx_equationgroup' in paragraph_tag['class']:
+                        collected_equations: list[doc_models.MathExpression] = []
+
                         for equation_tag in paragraph_tag.select('tbody'):
                             equation = self._decode_equation(equation_tag)
 
                             self._referencable_components[equation.component_id] = equation
-                            components.append(equation)
+                            collected_equations.append(equation)
+
+                        self._referencable_components[str(paragraph_tag['id'])] = (
+                            collected_equations[0]
+                        )
+                        components.extend(collected_equations)
 
                     elif paragraph_tag.name == 'ol' or paragraph_tag.name == 'ul':
                         components.append(self._decode_list(paragraph_tag))
@@ -280,7 +308,7 @@ class ArxivParser:
                 self._referencable_components[math_exp.component_id] = math_exp
                 paragraph_contents.append(math_exp)
 
-            elif 'ltx_ref' in child['class']:
+            elif 'ltx_ref' in child['class'] and child.name == 'a':
                 paragraph_contents.append(
                     doc_models.Reference(
                         component_id=str(child_idx),
@@ -311,6 +339,12 @@ class ArxivParser:
                     )
                 )
 
+            else:
+                decoded_stringlike = self._try_decode_stringlike_paragraph_element(child)
+
+                if decoded_stringlike is not None:
+                    paragraph_contents.append(decoded_stringlike)
+
         return doc_models.Paragraph(
             component_id=str(paragraph_tag['id']) if 'id' in paragraph_tag.attrs else '',
             description='Paragraph',
@@ -325,7 +359,25 @@ class ArxivParser:
         if not abstract_tag:
             raise self.ParsingError('Failed to extract abstract from arXiv paper.')
 
-        return abstract_tag.find(string=True, recursive=False).strip()  # type: ignore
+        return re.sub(r'\s+', ' ', abstract_tag.get_text().strip())
+
+    def _try_decode_stringlike_paragraph_element(self, element_tag: bs4.Tag) -> str | None:
+        """Decodes a paragraph element that is not a string, yet should be represented as such.
+
+        The string-like elements are not special document components (e.g. math expressions) and
+        are to be handled as scalar HTML elements, such as <strong>.
+        """
+
+        if 'ltx_font_italic' in element_tag['class']:
+            return f'<em>{self._extract_clean_text(element_tag)}</em>'
+
+        if 'ltx_font_bold' in element_tag['class']:
+            return f'<strong>{self._extract_clean_text(element_tag)}</strong>'
+
+        if 'ltx_url' in element_tag['class']:
+            return self._extract_clean_text(element_tag)
+
+        return None
 
     def _extract_bibliography(self, soup: bs4.BeautifulSoup) -> list[tuple[str, str]]:
         """Extracts the bibliography from the arXiv paper."""

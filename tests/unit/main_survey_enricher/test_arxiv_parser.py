@@ -11,6 +11,7 @@ from paper_enrichment_agent.main_survey_enricher.components.arxiv_parser import 
 EXAMPLE_PAPER_1 = '1905.09263'
 EXAMPLE_PAPER_2 = '2006.04558'
 EXAMPLE_PAPER_3 = '1706.03762'
+EXAMPLE_PAPER_4 = '1409.0473'
 
 EXAMPLE_PAPERS = [
     # FastSpeech: Fast, Robust and Controllable Text to Speech
@@ -30,6 +31,12 @@ EXAMPLE_PAPERS = [
         'id': EXAMPLE_PAPER_3,
         'path': pathlib.Path(__file__).parent / f'example_arxiv_paper_{EXAMPLE_PAPER_3}.html',
         'url': f'https://ar5iv.labs.arxiv.org/html/{EXAMPLE_PAPER_3}',
+    },
+    # Neural Machine Translation by Jointly Learning to Align and Translate
+    {
+        'id': EXAMPLE_PAPER_4,
+        'path': pathlib.Path(__file__).parent / f'example_arxiv_paper_{EXAMPLE_PAPER_4}.html',
+        'url': f'https://ar5iv.labs.arxiv.org/html/{EXAMPLE_PAPER_4}',
     },
 ]
 
@@ -61,13 +68,28 @@ class TestArxivParser:
         with pytest.raises(ArxivParser.ParsingError):
             parser.parse('nonexistent_paper_id')
 
-    def test_parses_correct_abstract(self, mock_example_paper):
+    @pytest.mark.parametrize(
+        'paper_id, begin_anchor, end_anchor',
+        [
+            (
+                EXAMPLE_PAPER_1,
+                'Neural network based end-to-end text to speech (TTS)',
+                'Synthesized speech samples can be found in https://speechresearch.github.io/fastspeech/.',
+            ),
+            (
+                EXAMPLE_PAPER_4,
+                'Neural machine translation is a recently proposed',
+                'the model agree well with our intuition.',
+            ),
+        ],
+    )
+    def test_parses_correct_abstract(self, mock_example_paper, paper_id, begin_anchor, end_anchor):
 
         parser = ArxivParser()
-        document = parser.parse('1905.09263')
+        document = parser.parse(paper_id)
 
-        assert document.abstract.startswith('Neural network based end-to-end text to speech (TTS)')
-        assert document.abstract.endswith('Therefore, we call our model FastSpeech.')
+        assert document.abstract.startswith(begin_anchor)
+        assert document.abstract.endswith(end_anchor)
 
     def test_parses_correct_sections(self, mock_example_paper):
 
@@ -188,7 +210,7 @@ class TestArxivParser:
             in equation_contents[5]
         )
 
-    def test_parses_correct_references(self, mock_example_paper):
+    def test_parses_correct_referenced_papers(self, mock_example_paper):
 
         parser = ArxivParser()
         document = parser.parse(EXAMPLE_PAPER_3)
@@ -288,3 +310,22 @@ class TestArxivParser:
         assert list_1.items[1].elements[-1] == '.'
         assert list_1.items[2].elements[0].startswith('Synthesized speech is lack')
         assert list_1.items[2].elements[-1].endswith('prosody in the autoregressive generation.')
+
+    def test_handles_unrecognized_tags_in_paragraph(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_4)
+
+        doc_getter = DocumentGetter(document)
+        assert isinstance(document.footnotes[2], doc_models.Paragraph)
+        assert (
+            document.footnotes[2].elements[0]
+            == '  http://www.statmt.org/wmt14/translation-task.html '
+        )
+
+        paragraph_with_italic = doc_getter.get_component_by_path('/sections/S2/S2.SS1/S2.SS1.p1.1')
+
+        assert isinstance(paragraph_with_italic, doc_models.Paragraph)
+        assert (
+            paragraph_with_italic.elements[0]
+            == 'Here, we describe briefly the underlying framework, called <em>RNN Encoder–Decoder</em>, proposed by '
+        )
