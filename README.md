@@ -28,6 +28,8 @@ You realize that you are unlikely to grasp the topic fully without additional co
 
 ### Footnote Enrichment Agent
 
+![Evaluation pipeline](docs/eval_pipeline_footnote_enrichment.drawio.png)
+
 ### Eval setup
 
 The evaluation is based on `mlflow` and its `pytest` plugin. The module hierarchy of the evaluation code is shown below: 
