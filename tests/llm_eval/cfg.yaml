@@ -4,4 +4,11 @@ active_suites: [
   'test_footnote_enrichment'
 ]
 suite_configs:
-  test_footnote_enrichment: {}
+  test_footnote_enrichment:
+    calibration_dataset: "calibration_ds/v1"
+    footnote_enrichment_service_url: "http://footnote_enrichment_agent:8081"
+    judge_llm_config:
+      model_name: groq/llama-3.3-70b-versatile
+      api_key: JUDGE_LLM_API_KEY
+      model_params:
+        temperature: 0.3
