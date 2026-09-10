@@ -36,7 +36,7 @@ def suite_name() -> str:
     raise NotImplementedError('Each test suite must override the `suite_name` fixture.')
 
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def _evaluation_config(request: pytest.FixtureRequest) -> harness_core.EvaluationConfig:
     """Fixture that exposes the loaded Hydra config dictionary to tests."""
     raw_cfg = request.config.getoption('--llm-eval-cfg')
@@ -54,19 +54,26 @@ def suite_config(
     return _evaluation_config.suite_configs[suite_name]
 
 
+@pytest.fixture(scope='session')
+def _mlflow_connected(_evaluation_config: harness_core.EvaluationConfig) -> None:
+    mlflow.set_tracking_uri(_evaluation_config.mlflow_tracking_uri)
+
+
 @pytest.fixture(scope='function', autouse=True)
 def suite_run(
     request: pytest.FixtureRequest,
     suite_name: str,
     _evaluation_config: harness_core.EvaluationConfig,
+    _mlflow_connected: None,
 ) -> Generator[harness_core.EvaluationRun, None, None]:
     """Sets up connection with the mlflow server and prepares evaluation run.
 
     This fixture should be injected to each @mlflow.test decorated test case.
     """
 
-    mlflow.set_tracking_uri(_evaluation_config.mlflow_tracking_uri)
     mlflow.set_experiment(suite_name)
 
     with mlflow.start_run(run_name=request.node.name) as run:
-        yield harness_core.EvaluationRun(mlflow_run=run)
+        yield harness_core.EvaluationRun(
+            mlflow_run=run, suite_config=_evaluation_config.suite_configs[suite_name]
+        )
