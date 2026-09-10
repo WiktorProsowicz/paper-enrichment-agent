@@ -34,13 +34,26 @@ run_unit_tests:
     uv run coverage report
 
 setup_mlflow_server:
-    @echo "Setting up MLflow server..."
+    #!/usr/bin/env bash
+    echo "Setting up MLflow server..."
+
+    if [ ! -f mlflow.env ]; then
+        echo "mlflow.env file not found. Please create it with the necessary environment variables."
+        exit 1
+    fi
+
     export $(cat mlflow.env | xargs)
     docker compose -f infrastructure/mlflow-server.yaml up -d
 
 setup_mlflow_server_clean:
     #!/usr/bin/env bash
     echo "Cleaning up MLflow server..."
+
+    if [ ! -f mlflow.env ]; then
+        echo "mlflow.env file not found. Please create it with the necessary environment variables."
+        exit 1
+    fi
+
     export $(cat mlflow.env | xargs)
 
     docker compose -f infrastructure/mlflow-server.yaml down
@@ -50,6 +63,12 @@ setup_mlflow_server_clean:
 run_llm_eval:
     #!/usr/bin/env bash
     echo "Cleaning up MLflow server..."
+
+    if [ ! -f app.env ]; then
+        echo "app.env file not found. Please create it with the necessary environment variables."
+        exit 1
+    fi
+
     export $(cat app.env | xargs)
 
     docker compose -f infrastructure/llm-eval.yaml up --attach llm-eval_eval_runner
