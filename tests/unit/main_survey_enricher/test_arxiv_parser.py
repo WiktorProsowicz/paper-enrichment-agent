@@ -69,6 +69,33 @@ class TestArxivParser:
             parser.parse('nonexistent_paper_id')
 
     @pytest.mark.parametrize(
+        'paper_id, expected_title',
+        [
+            (
+                EXAMPLE_PAPER_1,
+                'FastSpeech: Fast, Robust and Controllable Text to Speech',
+            ),
+            (
+                EXAMPLE_PAPER_2,
+                'FastSpeech 2: Fast and High-Quality End-to-End Text to Speech',
+            ),
+            (
+                EXAMPLE_PAPER_3,
+                'Attention Is All You Need',
+            ),
+            (
+                EXAMPLE_PAPER_4,
+                'Neural Machine Translation by Jointly Learning to Align and Translate',
+            ),
+        ],
+    )
+    def test_parses_correct_title(self, mock_example_paper, paper_id, expected_title):
+        parser = ArxivParser()
+        document = parser.parse(paper_id)
+
+        assert document.title == expected_title
+
+    @pytest.mark.parametrize(
         'paper_id, begin_anchor, end_anchor',
         [
             (

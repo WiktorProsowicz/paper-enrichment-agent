@@ -160,7 +160,7 @@ class FootnoteEnrichmentAgent:
             'messages': self._enrichment_prompt_template.format_messages(
                 survey_title=request.survey_title,
                 survey_abstract=request.survey_abstract,
-                cited_doc_title=request.reference_document_title,
+                cited_doc_title=request.reference_document.title,
                 cited_doc_abstract=request.reference_document.abstract,
                 citation_reference_text=citation_reference.content_text,
                 citation_context_fragment=citation_context,

@@ -18,6 +18,7 @@ SAMPLE_SURVEY_ID = 'sample_survey_id'
 def sample_survey_document() -> tuple[doc_models.Document, DocumentMetadata]:
 
     document = doc_models.Document(
+        title='Sample Document',
         abstract='This is a sample abstract.',
         description='This is a sample description.',
         sections=[
@@ -46,6 +47,7 @@ def sample_survey_document() -> tuple[doc_models.Document, DocumentMetadata]:
 def ref1_document() -> tuple[doc_models.Document, DocumentMetadata]:
 
     document = doc_models.Document(
+        title='Reference Paper 1',
         abstract='This is a sample abstract for Reference Paper 1.',
         description='This is a sample description for Reference Paper 1.',
         sections=[],
@@ -65,6 +67,7 @@ def ref1_document() -> tuple[doc_models.Document, DocumentMetadata]:
 def ref2_document() -> tuple[doc_models.Document, DocumentMetadata]:
 
     document = doc_models.Document(
+        title='Reference Paper 2',
         abstract='This is a sample abstract for Reference Paper 2.',
         description='This is a sample description for Reference Paper 2.',
         sections=[],
@@ -450,6 +453,7 @@ class TestGetDocumentDetails:
             images={},
         )
         db_client.get_document_struct_ref.return_value.__enter__.return_value = doc_models.Document(
+            title='Sample Document',
             abstract='This is a sample abstract.',
             description='This is a sample description.',
             sections=[],
@@ -476,6 +480,7 @@ class TestRemoveDocumentComponent:
 
         db_client = MagicMock()
         db_client.get_document_struct_ref.return_value.__enter__.return_value = doc_models.Document(
+            title='Sample Document',
             abstract='This is a sample abstract.',
             description='This is a sample description.',
             sections=[

@@ -32,10 +32,10 @@ def test_judge_calibration(eval_run: harness_core.EvaluationRun):
         assert isinstance(referencing_paragraph, doc_models.Paragraph)
 
         request = misc_models.FootnoteEnrichmentRequest(
-            survey_title=inputs.survey_title,
+            survey_title=survey_doc.title,
             survey_abstract=survey_doc.abstract,
             reference_document=cited_doc,
-            reference_document_title=inputs.cited_document_title,
+            reference_document_title=cited_doc.title,
             reference_id=inputs.reference_id,
             referencing_paragraph=referencing_paragraph,
             citation_context_info=inputs.citation_context,

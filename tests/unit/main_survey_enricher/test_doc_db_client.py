@@ -16,6 +16,7 @@ from paper_enrichment_agent.common.models.misc import SurveyMetadata, DocumentMe
 def sample_document() -> doc_models.Document:
 
     return doc_models.Document(
+        title='Sample Document',
         abstract='This is a sample abstract.',
         description='This is a sample description.',
         sections=[

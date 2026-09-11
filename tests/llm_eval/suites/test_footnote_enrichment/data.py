@@ -12,9 +12,7 @@ class FootnoteEnrichmentDSInputs(pydantic.BaseModel):
     See :class:`FootnoteEnrichmentRequest` for more details.
     """
 
-    survey_title: str
     survey_arxiv_id: str
-    cited_document_title: str
     cited_document_arxiv_id: str
     citing_paragraph_path: str
     reference_id: str

@@ -65,7 +65,7 @@ class FootnoteEnrichmentAgentService:
                     'Successfully enriched footnote for agent session',
                     session_id=request.session_id,
                     survey_title=request.survey_title,
-                    reference_document_title=request.reference_document_title,
+                    reference_document_title=request.reference_document.title,
                 )
 
                 return footnote

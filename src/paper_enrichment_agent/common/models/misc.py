@@ -76,10 +76,6 @@ class FootnoteEnrichmentRequest(pydantic.BaseModel):
         doc_models.Document, Field(description='The document referenced by the survey.')
     ]
 
-    reference_document_title: Annotated[
-        str, Field(description='The title of the document referenced by the survey.')
-    ]
-
     reference_id: Annotated[
         str, Field(description='The component_id of the reference to the document in the survey.')
     ]

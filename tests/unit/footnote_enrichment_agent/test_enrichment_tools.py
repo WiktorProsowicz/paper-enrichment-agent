@@ -8,6 +8,7 @@ from paper_enrichment_agent.common.models import document as doc_models
 def sample_enrichment_tools():
     return enrichment_context.EnrichmentTools(
         doc_models.Document(
+            title='Sample Document',
             abstract='Sample abstract',
             description='Sample description',
             sections=[

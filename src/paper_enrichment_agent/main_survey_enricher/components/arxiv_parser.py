@@ -62,6 +62,7 @@ class ArxivParser:
         soup = bs4.BeautifulSoup(response.content, 'html.parser')
 
         document = doc_models.Document(
+            title=self._extract_document_title(soup),
             abstract=self._extract_abstract(soup),
             description=f'arXiv:{paper_id}',
             sections=[
@@ -350,6 +351,16 @@ class ArxivParser:
             description='Paragraph',
             elements=paragraph_contents,
         )
+
+    def _extract_document_title(self, soup: bs4.BeautifulSoup) -> str:
+        """Extracts the title from the arXiv paper."""
+
+        title_tag = soup.select_one('h1.ltx_title')
+
+        if not title_tag:
+            raise self.ParsingError('Failed to extract title from arXiv paper.')
+
+        return self._extract_clean_text(title_tag)
 
     def _extract_abstract(self, soup: bs4.BeautifulSoup) -> str:
         """Extracts the abstract from the arXiv paper."""

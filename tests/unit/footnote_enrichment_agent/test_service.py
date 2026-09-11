@@ -9,6 +9,7 @@ from paper_enrichment_agent.footnote_enrichment_agent.service import FootnoteEnr
 @pytest.fixture(scope='session')
 def sample_reference_document():
     return doc_models.Document(
+        title='Sample Reference Document',
         abstract='This is a sample reference document abstract.',
         description='This is a sample reference document description.',
         sections=[

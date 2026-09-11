@@ -7,7 +7,7 @@ from paper_enrichment_agent.common.models import document as doc_models
 @pytest.fixture(scope='session')
 def sample_document():
     return doc_models.Document(
-        component_id='doc_1',
+        title='Sample Document',
         description='Sample document for testing.',
         abstract='Document abstract.',
         sections=[

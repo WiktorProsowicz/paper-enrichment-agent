@@ -157,6 +157,7 @@ class Document(pydantic.BaseModel):
 
     type FootnoteType = Paragraph | Section
 
+    title: Annotated[str, Field(description='The title of the document.')]
     abstract: Annotated[str, Field(description='The abstract of the document.')]
     description: Annotated[str | None, Field(description='Optional description of the document.')]
     sections: Annotated[list[Section], Field(description='List of sections in the document.')]
