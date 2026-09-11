@@ -1,0 +1,58 @@
+name: unit-tests
+
+services:
+  init-results-dir:
+    image: busybox
+    restart: "no"
+    user: "0"
+    volumes:
+      - ../test_results:/data/test_results
+    entrypoint: >
+      sh -c "
+        chown -R 1000:1000 /data/test_results &&
+        echo 'Volume permissions initialized'
+      "
+
+  pytest:
+    build:
+      dockerfile: infrastructure/app-base.Dockerfile
+      context: ..
+      target: eval
+    restart: no
+    environment:
+      COVERAGE_FILE: /opt/app/test_results/.coverage
+    volumes:
+      - ../test_results:/opt/app/test_results
+    entrypoint:
+      [
+        "uv", "run", "python", "-m", "pytest", "--import-mode=prepend", "-s",
+        "tests/unit",
+        "--tb=short", "-v",
+        "--junitxml=test_results/tests_report.xml",
+        "-W", "ignore::DeprecationWarning",
+        "--cov=src", "--cov-report=", "--cov-fail-under=0",
+        "--disable-warnings"
+      ]
+    depends_on:
+      init-results-dir:
+        condition: service_completed_successfully
+
+
+  coverage:
+    build:
+      dockerfile: infrastructure/app-base.Dockerfile
+      context: ..
+      target: eval
+    restart: no
+    environment:
+      COVERAGE_FILE: /opt/app/test_results/.coverage
+    volumes:
+      - ../test_results:/opt/app/test_results
+    entrypoint:
+      [
+        "sh", "-c",
+        "uv run coverage html --fail-under=0 -d test_results/coverage_html_report && uv run coverage report"
+      ]
+    depends_on:
+      pytest:
+        condition: service_completed_successfully

@@ -17,21 +17,9 @@ run_local_checks:
 
 # Runs the unit tests and reports the coverage of the sources
 run_unit_tests:
-    @echo "Cleaning test results directory..."
-    rm -rf test_results
-    mkdir -p test_results
-
-    @echo "Running tests..."
-    uv run python -m pytest --import-mode=prepend -s \
-        tests/unit --tb=short -v \
-        --junitxml=test_results/tests_report.xml \
-        -W ignore::DeprecationWarning \
-        --cov=src \
-        --cov-report=html:test_results/coverage_html_report \
-        --disable-warnings
-
-    @echo "Reporting coverage..."
-    uv run coverage report
+    #!/usr/bin/env bash
+    set -euo pipefail
+    docker compose -f infrastructure/unit-tests.yaml up --build --abort-on-container-failure
 
 setup_mlflow_server:
     #!/usr/bin/env bash
