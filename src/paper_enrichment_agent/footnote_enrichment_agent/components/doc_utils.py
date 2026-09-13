@@ -22,12 +22,19 @@ class StringifiedParagraphElement:
 
 def stringify_paragraph_elements(
     paragraph: doc_models.Paragraph,
+    keep_citation_references: bool = False,
 ) -> list[StringifiedParagraphElement]:
     """Converts the elements of a paragraph into a list of stringified elements.
 
     The citation references are grouped together and represented as a single stringified element,
     while other elements are stringified individually. Links and math expressions are preserved so
-     that they can be referenced later if needed.
+    that they can be referenced later if needed.
+
+    Args:
+        paragraph: The paragraph to be stringified.
+        keep_citation_references: Whether to keep citation references components in the stringified
+            output. If false, citation references will be represented as plain text without the
+            original component.
     """
 
     str_elements: list[StringifiedParagraphElement] = []
@@ -39,12 +46,21 @@ def stringify_paragraph_elements(
         paragraph.elements, key=is_citation
     ):
         if is_sequence_of_citations:
-            str_elements.append(
-                StringifiedParagraphElement(
-                    str_content='[' + ', '.join(e.content_text for e in elements) + ']',  # type: ignore[union-attr]
-                    doc_component=None,
+            if not keep_citation_references:
+                str_elements.append(
+                    StringifiedParagraphElement(
+                        str_content='[' + ', '.join(e.content_text for e in elements) + ']',  # type: ignore[union-attr]
+                        doc_component=None,
+                    )
                 )
-            )
+            else:
+                str_elements.extend(
+                    StringifiedParagraphElement(
+                        str_content=f'[{e.content_text}]',  # type: ignore[union-attr]
+                        doc_component=e,
+                    )
+                    for e in elements
+                )
         else:
             for element in elements:
                 if isinstance(element, doc_models.MathExpression):
@@ -89,11 +105,11 @@ def get_context_of_citation_in_paragraph(
     """Extracts the textual context surrounding a citation within a paragraph.
 
     The context is extracted from the stringified form of the paragraph. The context includes
-    roughly `n_context_chars` / 2 characters before and after the citation, capped by the start and end
-    of the paragraph.
+    roughly `n_context_chars` / 2 characters before and after the citation, capped by the start and
+    end of the paragraph.
     """
 
-    str_elements = stringify_paragraph_elements(paragraph)
+    str_elements = stringify_paragraph_elements(paragraph, keep_citation_references=True)
     paragraph_str = ''.join(e.str_content for e in str_elements)
 
     try:
