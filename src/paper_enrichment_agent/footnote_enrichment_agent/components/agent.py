@@ -9,6 +9,7 @@ import pathlib
 from typing import Annotated, TypedDict
 
 import mcp
+import mlflow
 import pydantic
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.prompts import (
@@ -19,7 +20,8 @@ from langchain_core.prompts import (
 from langchain_litellm import ChatLiteLLM
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
-from mcp.client.sse import sse_client as mcp_client
+from mcp.client.streamable_http import streamable_http_client as mcp_client
+from mlflow.entities import SpanType
 
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models.misc import FootnoteEnrichmentRequest
@@ -98,6 +100,7 @@ class FootnoteEnrichmentAgent:
             ]
         )
 
+    @mlflow.trace(name='FootnoteEnrichmentAgent:invoke', span_type=SpanType.AGENT)
     async def invoke(
         self,
         request: FootnoteEnrichmentRequest,
@@ -113,9 +116,11 @@ class FootnoteEnrichmentAgent:
             enrichment_tools: The current state of the tools available for footnote enrichment.
         """
 
+        mlflow.update_current_trace(session_id=request.session_id)
+
         builder = StateGraph(AgentState, input_schema=FootnoteEnrichmentRequest)
 
-        builder.add_node('enrich_new_footnote', self._enrich_new_footnote)  # type: ignore[call-overload]
+        builder.add_node('enrich_new_footnote', self._enrich_new_footnote)  # type: ignore
         builder.add_node('perform_agent_reasoning_step', self._perform_agent_reasoning_step)
         builder.add_node('perform_agent_action_step', self._perform_agent_action_step)
 
@@ -178,9 +183,9 @@ class FootnoteEnrichmentAgent:
 
         mcp_url = f'{self._cfg.mcp_server_url_base}/{state["enrichment_session_id"]}'
 
-        async with mcp_client(mcp_url) as connection_streams:  # noqa: F841, SIM117
+        async with mcp_client(mcp_url) as (read_stream, write_stream, _):  # noqa: F841, SIM117
             async with mcp.ClientSession(
-                **connection_streams, read_timeout_seconds=self._MCP_OPERATION_TIMEOUT
+                read_stream, write_stream, read_timeout_seconds=self._MCP_OPERATION_TIMEOUT
             ) as mcp_session:
                 await mcp_session.initialize()
 
@@ -189,19 +194,21 @@ class FootnoteEnrichmentAgent:
                 llm_with_tools = self._llm.bind_tools(
                     [
                         {
-                            'name': tool.name,
-                            'description': tool.description,
-                            'inputSchema': tool.inputSchema,
-                            'outputSchema': tool.outputSchema,
+                            'type': 'function',
+                            'function': {
+                                'name': tool.name,
+                                'description': tool.description,
+                                'parameters': tool.inputSchema,
+                            },
                         }
                         for tool in mcp_tools
                     ],
-                    tool_invoker='auto',
+                    tool_choice='auto',
                 )
 
                 model_response = await llm_with_tools.ainvoke(state['messages'])
 
-                return {'messages': state['messages'] + [model_response]}  # type: ignore[typeddict-item]
+                return {'messages': [model_response]}  # type: ignore[typeddict-item]
 
     async def _perform_agent_action_step(self, state: AgentState) -> AgentState:
         """Performs a single step of the agent's action execution loop.
@@ -222,9 +229,9 @@ class FootnoteEnrichmentAgent:
 
         tool_responses: list[ToolMessage] = []
 
-        async with mcp_client(mcp_url) as connection_streams:  # noqa: F841, SIM117
+        async with mcp_client(mcp_url) as (read_stream, write_stream, _):  # noqa: F841, SIM117
             async with mcp.ClientSession(
-                **connection_streams, read_timeout_seconds=self._MCP_OPERATION_TIMEOUT
+                read_stream, write_stream, read_timeout_seconds=self._MCP_OPERATION_TIMEOUT
             ) as mcp_session:
                 await mcp_session.initialize()
 
@@ -240,7 +247,7 @@ class FootnoteEnrichmentAgent:
                         )
                     )
 
-        return {'messages': state['messages'] + tool_responses}  # type: ignore[typeddict-item]
+        return {'messages': tool_responses}  # type: ignore[typeddict-item]
 
     async def _call_tool_or_finish_loop(self, state: AgentState) -> str:
         """Decides whether to call a tool or finish the agent's reasoning loop."""

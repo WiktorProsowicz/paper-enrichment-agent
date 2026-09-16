@@ -1,14 +1,22 @@
-mlflow_tracking_uri: "http://localhost:5000"
-experiment_prefix: llm_eval
+mlflow_tracking_uri: "http://mlflow:5000"
 active_suites: [
   'test_footnote_enrichment'
 ]
+
 suite_configs:
   test_footnote_enrichment:
-    calibration_dataset: "calibration_ds/v1"
-    footnote_enrichment_service_url: "http://footnote_enrichment_agent:8081"
+    footnote_enrichment_service_url: "http://footnote-enrichment-agent:8081"
+    enrichment_service_reuqest_timeout: 60
+
+    datasets:
+      footnote_enrichment: "footnote_enrichment_ds/v1"
+    
+    thresholds:
+      footnote_enrichment:
+        figure_usefulness_rating: 4.0
+    
     judge_llm_config:
-      model_name: groq/llama-3.3-70b-versatile
+      model_name: deepinfra/meta-llama/Llama-3.3-70B-Instruct-Turbo
       api_key: JUDGE_LLM_API_KEY
       model_params:
         temperature: 0.3

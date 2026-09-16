@@ -16,6 +16,7 @@ import pydantic
 import uvicorn
 from langchain_litellm import ChatLiteLLM
 from pydantic import Field
+from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
 from paper_enrichment_agent.common import logging_setup, mlflow_setup
@@ -89,9 +90,14 @@ def create_app(
 
     @app.middleware('http')
     async def mlflow_trace_context(request: fastapi.Request, call_next):  # type: ignore
+
         headers = dict(request.headers)
 
-        with mlflow.tracing.set_tracing_context_from_http_request_headers(headers):
+        if 'traceparent' in headers:
+            with mlflow.tracing.set_tracing_context_from_http_request_headers(headers):
+                response = await call_next(request)
+
+        else:
             response = await call_next(request)
 
         return response
@@ -102,17 +108,23 @@ def create_app(
     ) -> doc_models.Section:
         return await service.reference_to_footnote(request)
 
-    async def mcp_dispatch(scope: Scope, receive: Receive, send: Send) -> None:
+    class MCPDispatch:
+        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+            session_id = scope['path_params']['session_id']
+            mcp_endpoint = enrichment_context_manager.get_mcp_app_for_agent_session(session_id)
 
-        session_id = scope['path_params']['session_id']
-        mcp_endpoint = enrichment_context_manager.get_mcp_app_for_agent_session(session_id)
-
-        await mcp_endpoint(scope, receive, send)
+            mcp_scope = {
+                **scope,
+                'path': '/mcp',
+                'raw_path': b'/mcp',
+                'path_params': {},
+            }
+            await mcp_endpoint(mcp_scope, receive, send)
 
     app.router.routes.append(
-        fastapi.routing.APIRoute(
+        Route(
             path='/mcp/{session_id:path}',
-            endpoint=mcp_dispatch,
+            endpoint=MCPDispatch(),
             methods=['GET', 'POST'],
         )
     )
@@ -120,7 +132,7 @@ def create_app(
     return app
 
 
-@hydra.main(version_base=None, config_path='cfg', config_name='main')
+@hydra.main(version_base='1.3', config_path='cfg', config_name='main')
 def main(hydra_cfg: omegaconf.DictConfig) -> None:
     """Main entrypoint of the application."""
 
@@ -135,7 +147,7 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
 
     enrichment_agent = FootnoteEnrichmentAgent(
         llm=ChatLiteLLM(
-            name=app_cfg.agent_llm_model, api_key=app_cfg.llm_api_key, **app_cfg.agent_llm_params
+            model=app_cfg.agent_llm_model, api_key=app_cfg.llm_api_key, **app_cfg.agent_llm_params
         ),
         cfg=app_cfg.agent_cfg,
     )

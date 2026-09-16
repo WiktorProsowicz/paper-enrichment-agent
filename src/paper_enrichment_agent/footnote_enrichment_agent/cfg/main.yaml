@@ -6,10 +6,10 @@ mlflow_cfg:
   tracking_uri: "http://mlflow:5000"
 
 agent_cfg:
-  citation_context_chars: 400
+  citation_context_chars: 800
   mcp_server_url_base: "http://localhost:8081/mcp"
 
-agent_llm_model: "groq/llama-3.3-70b-versatile"
+agent_llm_model: deepinfra/meta-llama/Llama-3.3-70B-Instruct-Turbo
 
 agent_llm_params:
   temperature: 0.7

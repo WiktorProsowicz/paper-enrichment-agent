@@ -51,7 +51,7 @@ class FootnoteEnrichmentAgentService:
         """
 
         try:
-            with self._enrichment_context_manager.setup_mcp_for_agent_session(
+            async with self._enrichment_context_manager.setup_mcp_for_agent_session(
                 request.session_id, request.reference_document
             ) as enrichment_tools:
                 start_time = time.perf_counter()

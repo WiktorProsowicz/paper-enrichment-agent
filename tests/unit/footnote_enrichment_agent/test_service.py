@@ -61,7 +61,7 @@ def sample_enrichment_request(sample_reference_document):
 def mock_enrichment_context_manager():
     enrichment_context_manager = MagicMock()
     enrichment_tools = MagicMock()
-    enrichment_context_manager.setup_mcp_for_agent_session.return_value.__enter__.return_value = (
+    enrichment_context_manager.setup_mcp_for_agent_session.return_value.__aenter__.return_value = (
         enrichment_tools
     )
     return enrichment_context_manager, enrichment_tools

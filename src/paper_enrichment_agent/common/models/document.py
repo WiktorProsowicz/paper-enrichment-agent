@@ -171,3 +171,6 @@ class Document(pydantic.BaseModel):
 
     def __str__(self) -> str:
         return f'Document(abstract="{self.abstract[:30]}...", sections={len(self.sections)})'
+
+    def __repr__(self) -> str:
+        return self.__str__()
