@@ -19,19 +19,10 @@ class FootnoteEnrichmentDSInputs(pydantic.BaseModel):
     citation_context: str
 
 
-class FootnoteEnrichmentDSExpectations(pydantic.BaseModel):
+class CalibrationDSExpectations(pydantic.BaseModel):
     """Expected ratings for LLM Judges calibration."""
 
     footnote: doc_models.Section
     figure_usefulness_rating: int
     text_relevance_rating: int
     title_fitness_rating: int
-
-
-type ScorerCalibrationEvalSample = harness_core.EvalSample[
-    FootnoteEnrichmentDSInputs, FootnoteEnrichmentDSExpectations
-]
-
-type FootnoteEnrichmentEvalSample = harness_core.EvalSample[
-    FootnoteEnrichmentDSInputs, dict[str, Any]
-]

@@ -11,7 +11,7 @@ import hydra
 import omegaconf
 from functools import cache
 
-from llm_eval import core as harness_core
+import core as harness_core
 from paper_enrichment_agent.common import logging_setup
 
 
@@ -20,7 +20,7 @@ def _logger() -> logging_setup.LoggerType:
     return logging_setup.get_logger(__name__)
 
 
-@hydra.main(config_path='.', config_name='cfg')
+@hydra.main(version_base='1.3', config_path='.', config_name='cfg')
 def main(eval_cfg_dict: omegaconf.DictConfig) -> None:
     """Main entry point for the evaluation script."""
 
@@ -38,13 +38,15 @@ def main(eval_cfg_dict: omegaconf.DictConfig) -> None:
                 sys.executable,
                 '-m',
                 'pytest',
-                'tests/llm_eval/suites',
+                '--capture=tee-sys',
+                '--show-capture=all',
+                '-v',
                 '--llm-eval-cfg',
                 eval_cfg.model_dump_json(),
+                'tests/llm_eval/suites/',
             ],
             check=True,
         )
-        return
 
     _logger().info('Running active test suites.')
 
@@ -56,9 +58,12 @@ def main(eval_cfg_dict: omegaconf.DictConfig) -> None:
                 sys.executable,
                 '-m',
                 'pytest',
-                f'tests/llm_eval/suites/{suite_name}',
+                '--capture=tee-sys',
+                '--show-capture=all',
+                '-v',
                 '--llm-eval-cfg',
                 eval_cfg.model_dump_json(),
+                f'tests/llm_eval/suites/{suite_name}',
             ],
             check=True,
         )

@@ -62,18 +62,18 @@ class HTTPClient:
             return response_schema.model_validate(response.json())
 
         except httpx.TimeoutException as e:
-            _logger().error('HTTP request timed out', path=path, payload=payload.model_dump())
+            _logger().error('HTTP request timed out', path=path, payload=str(payload))
             raise self.HTTPClientError('HTTP request timed out') from e
 
-        except httpx.RequestError as e:
-            _logger().error('HTTP request failed', path=path, payload=payload.model_dump())
+        except httpx.HTTPError as e:
+            _logger().error('HTTP request failed', path=path, payload=str(payload))
             raise self.HTTPClientError('HTTP request failed') from e
 
         except pydantic.ValidationError as e:
             _logger().error(
                 'Failed to validate HTTP response',
                 path=path,
-                payload=payload.model_dump(),
+                payload=str(payload),
                 output_schema=response_schema.__name__,
             )
             raise self.HTTPClientError('Failed to validate HTTP response') from e

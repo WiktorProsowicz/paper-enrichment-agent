@@ -1,6 +1,8 @@
 """Global utilities and core functions for the LLM evaluation framework."""
 
-from typing import Annotated, Any
+import dataclasses
+import functools
+from typing import Annotated, Any, get_type_hints
 from collections.abc import Callable
 import inspect
 
@@ -32,11 +34,12 @@ class EvaluationConfig(pydantic.BaseModel):
         ),
     ]
     suite_configs: Annotated[
-        dict[str, omegaconf.DictConfig], Field(description='The per-suite configurations')
+        dict[str, dict[str, Any]], Field(description='The per-suite configurations')
     ]
 
 
-class EvaluationRun(pydantic.BaseModel):
+@dataclasses.dataclass
+class EvaluationRun:
     """Represents a single run of the evaluation suite.
 
     The run is injected to the @mlflow.test decorated cases.
@@ -44,20 +47,6 @@ class EvaluationRun(pydantic.BaseModel):
 
     mlflow_run: mlflow_entities.Run
     suite_config: omegaconf.DictConfig
-
-
-class EvalSample[InputsT, ExpectationsT](pydantic.BaseModel):
-    """One record of an evaluation dataset, as a suite reads it.
-
-    Each suite that wants to use a custom type for test data samples should override the
-    from_ds_record method.
-    """
-
-    model_config = pydantic.ConfigDict(extra='forbid', frozen=True)
-
-    record_id: str
-    inputs: InputsT
-    expectations: ExpectationsT
 
 
 def validate_results(run_id: str, result: EvaluationResult, thresholds: dict[str, float]) -> str:
@@ -96,12 +85,17 @@ def validate_results(run_id: str, result: EvaluationResult, thresholds: dict[str
     return failure_reason
 
 
-def load_dataset(dataset_name: str, sample_type: type[EvalSample]) -> EvaluationDataset:
+def load_dataset(
+    dataset_name: str,
+    inputs_type: type[pydantic.BaseModel],
+    expectations_type: type[pydantic.BaseModel] | None = None,
+) -> EvaluationDataset:
     """Fetches a registered MLFlow dataset and checks every record's shape.
 
     Args:
         dataset_name: Registered evaluation dataset to read.
-        sample_type: The suite's sample class used to validate the json-serialized data.
+        inputs_type: The type of the inputs for each sample.
+        expectations_type: The type of the expectations for each sample, if applicable.
 
     Returns:
         The dataset, ready to hand to ``mlflow.genai.evaluate``.
@@ -118,7 +112,10 @@ def load_dataset(dataset_name: str, sample_type: type[EvalSample]) -> Evaluation
         raise ValueError(message)
 
     for record in records:
-        sample_type.model_validate(record)
+        inputs_type.model_validate(record['inputs'])
+
+        if expectations_type:
+            expectations_type.model_validate(record['expectations'])
 
     return dataset
 
@@ -138,7 +135,7 @@ def scorer_with_typed_args() -> Callable[[Callable[..., Any]], mlflow.genai.Scor
     """
 
     def decorate(score: Callable[..., Any]) -> mlflow.genai.Scorer:
-        wanted_params_dict = inspect.signature(score).parameters
+        wanted_params_dict = get_type_hints(score)
 
         def adapter(inputs: dict, outputs: Any, expectations: dict, trace: Any) -> Any:
             available = {
@@ -149,19 +146,58 @@ def scorer_with_typed_args() -> Callable[[Callable[..., Any]], mlflow.genai.Scor
             }
 
             for arg_name, arg_spec in wanted_params_dict.items():
-                if issubclass(arg_spec.annotation, pydantic.BaseModel):
-                    available[arg_name] = arg_spec.annotation.model_validate(available[arg_name])
+                if (
+                    arg_name in available
+                    and inspect.isclass(arg_spec)
+                    and issubclass(arg_spec, pydantic.BaseModel)
+                ):
+                    available[arg_name] = arg_spec.model_validate(available[arg_name])
 
             return score(
-                **{name: get() for name, get in available.items() if name in wanted_params_dict}
+                **{name: arg for name, arg in available.items() if name in wanted_params_dict}
             )
 
         # Deliberately not functools.wraps: MLflow reads the registered function's
         # signature to decide what to pass, and wraps would make it report the inner
-        # one (sample, ...), which MLflow cannot fill.
+        # one which MLflow cannot fill.
         adapter.__name__ = score.__name__
         adapter.__doc__ = score.__doc__
 
         return mlflow.genai.scorer(adapter)
 
     return decorate
+
+
+def predict_with_typed_inputs(
+    predict_fn: Callable[[type[pydantic.BaseModel]], Any],
+) -> Callable[..., Any]:
+    """Enables using a single `inputs` pydantic model for the predict function.
+
+    The decorator wraps a function with a signature like `def predict(inputs: MyInputsModel) -> Any`
+    into a function that is compatible with MLflow's `mlflow.genai.evaluate`, which parameters
+    for each field in the inputs dictionary, like `def predict(arg1, arg2, ...) -> Any`.
+    """
+
+    inputs_type: type[pydantic.BaseModel] = next(iter(get_type_hints(predict_fn).values()))
+
+    def build_inputs(kwargs: dict[str, Any]) -> pydantic.BaseModel:
+        inputs_dict = {
+            key: value for key, value in kwargs.items() if key in inputs_type.model_fields
+        }
+        return inputs_type.model_validate(inputs_dict)
+
+    if inspect.iscoroutinefunction(predict_fn):
+
+        @functools.wraps(predict_fn)
+        async def async_adapter(**kwargs: Any) -> Any:
+            inputs_model = build_inputs(kwargs)
+            return await predict_fn(inputs_model)
+
+        return async_adapter
+
+    @functools.wraps(predict_fn)
+    def sync_adapter(**kwargs: Any) -> Any:
+        inputs_model = build_inputs(kwargs)
+        return predict_fn(inputs_model)
+
+    return sync_adapter

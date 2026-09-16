@@ -9,11 +9,18 @@ test case.
 """
 
 from collections.abc import Generator
-import pytest
+import os
+import pathlib
+
 import mlflow
 import omegaconf
 
+import pytest
+from mlflow.pytest import session as mlflow_plugin_session
 from llm_eval import core as harness_core
+
+from paper_enrichment_agent.common import mlflow_setup
+from paper_enrichment_agent.common import logging_setup
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -56,7 +63,17 @@ def suite_config(
 
 @pytest.fixture(scope='session')
 def _mlflow_connected(_evaluation_config: harness_core.EvaluationConfig) -> None:
-    mlflow.set_tracking_uri(_evaluation_config.mlflow_tracking_uri)
+
+    os.environ['GIT_PYTHON_REFRESH'] = 'quiet'
+    os.environ['MLFLOW_GENAI_EVAL_MAX_WORKERS'] = '4'
+    os.environ['MLFLOW_GENAI_EVAL_MAX_SCORER_WORKERS'] = '2'
+    os.environ['MLFLOW_GENAI_EVAL_MAX_RETRIES'] = '3'
+    os.environ['MLFLOW_GENAI_EVAL_LLM_TIMEOUT'] = '120'
+    os.environ['MLFLOW_GENAI_EVAL_SKIP_TRACE_VALIDATION'] = 'true'
+
+    mlflow_setup.setup_mlflow(
+        mlflow_setup.MLFlowConfig(tracking_uri=_evaluation_config.mlflow_tracking_uri)
+    )
 
 
 @pytest.fixture(scope='function', autouse=True)
@@ -73,7 +90,15 @@ def suite_run(
 
     mlflow.set_experiment(suite_name)
 
-    with mlflow.start_run(run_name=request.node.name) as run:
-        yield harness_core.EvaluationRun(
-            mlflow_run=run, suite_config=_evaluation_config.suite_configs[suite_name]
-        )
+    try:
+        with mlflow.start_run(run_name=request.node.name) as run:
+            mlflow_plugin_session._run_id = run.info.run_id
+            mlflow_plugin_session._run_owned = False
+
+            yield harness_core.EvaluationRun(
+                mlflow_run=run, suite_config=_evaluation_config.suite_configs[suite_name]
+            )
+
+    finally:
+        mlflow_plugin_session._run_id = None
+        mlflow_plugin_session._run_owned = False
