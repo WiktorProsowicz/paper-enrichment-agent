@@ -10,6 +10,7 @@ services:
     entrypoint: >
       sh -c "
         chown -R 1000:1000 /data/test_results &&
+        rm -rf /data/test_results/* &&
         echo 'Volume permissions initialized'
       "
 
