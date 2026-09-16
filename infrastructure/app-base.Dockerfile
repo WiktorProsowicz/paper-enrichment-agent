@@ -8,7 +8,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN addgroup python-group \
     && adduser --disabled-password --shell /bin/bash --ingroup python-group python
 
-RUN rm -rf /var/cache/apt/archives /var/lib/apt/lists/*
+RUN apt update && \
+    apt install -y curl && \
+    rm -rf /var/cache/apt/archives /var/lib/apt/lists/*
 
 USER python
 WORKDIR ${APP_WORKDIR}

@@ -44,19 +44,19 @@ setup_mlflow_server_clean:
 
     export $(cat mlflow.env | xargs)
 
-    docker compose -f infrastructure/mlflow-server.yaml down
-    docker volume rm -f mlflow-server_mlflow-postgres-data mlflow-server_mlflow-artifacts
+    docker compose -f infrastructure/mlflow-server.yaml down -v
     docker compose -f infrastructure/mlflow-server.yaml up --build -d
 
 run_llm_eval:
     #!/usr/bin/env bash
     echo "Cleaning up MLflow server..."
 
-    if [ ! -f app.env ]; then
-        echo "app.env file not found. Please create it with the necessary environment variables."
+    if [ ! -f llm-eval.env ]; then
+        echo "llm-eval.env file not found. Please create it with the necessary environment variables."
         exit 1
     fi
 
-    export $(cat app.env | xargs)
+    export $(cat llm-eval.env | xargs)
 
-    docker compose -f infrastructure/llm-eval.yaml up --attach llm-eval_eval_runner
+    docker compose -f infrastructure/llm-eval.yaml down -v
+    docker compose -f infrastructure/llm-eval.yaml up --build --attach eval-runner --abort-on-container-exit --exit-code-from eval-runner

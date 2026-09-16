@@ -12,3 +12,5 @@ outputs/
 persist_dir/
 mlflow.env
 app.env
+llm-eval.env
+data/
