@@ -15,6 +15,8 @@ You should rate the usefulness of the choice of Figures in the generated footnot
 - 1: The Figures are irrelevant or misleading, and do not contribute to the reader's understanding of the cited document. E.g. the document is cited for its specific neural architecture applied, but the Figures are taken from the Results section and contain irrelevant evaluation details.
 - 5: The Figures are highly relevant and provide a clear and concise overview of the cited document's methodology, results, or key concepts, enhancing the reader's understanding of the document without requiring them to read it in full. Properly chosen Figures should be directly related to the context of the citation and should not include excessive detail that is not relevant to the base article's discussion.
 
+Note: If the agent omitted some Figures that are relevant or included superfluous ones, this should motivate you to give slightly worse score. If the figures are neither tragic nor excelent, you should give some intermediate score, according to the assessed relevance.
+
 ## Required response format
 
 Your response should be a JSON object with the following fields:

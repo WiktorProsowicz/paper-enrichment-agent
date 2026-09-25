@@ -38,13 +38,11 @@ def setup_mlflow(config: MLFlowConfig | None) -> None:
     _logger().info('MLFlow tracing is enabled.', server_uri=config.tracking_uri)
     mlflow.set_tracking_uri(config.tracking_uri)
 
-    mlflow.langchain.autolog(run_tracer_inline=True)
     mlflow.litellm.autolog()
 
     os.environ['MLFLOW_TRACE_SAMPLE_RATIO'] = '1.0'
-    os.environ['MLFLOW_ENABLE_ASYNC_TRACE_LOGGING'] = 'true'
+    os.environ['MLFLOW_ENABLE_ASYNC_TRACE_LOGGING'] = 'false'
     os.environ['MLFLOW_USE_BATCH_SPAN_PROCESSOR'] = 'false'
-    os.environ['MLFLOW_ASYNC_TRACE_LOGGING_MAX_WORKERS'] = '4'
     os.environ['MLFLOW_ENABLE_OTEL_GENAI_SEMCONV'] = 'true'
 
 
