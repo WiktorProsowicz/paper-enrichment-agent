@@ -1,19 +1,11 @@
-"""Utilities for managing setup/teardown lifecycle of footnote enrichment tools.
+"""Utilities for managing the state of the footnote enrichment tools.
 
 Exported classes:
     EnrichmentTools: Represents the state of a single footnote-enrichment session.
-    EnrichmentContextManager: Manages the setup and teardown of the footnote-enrichment tools state.
 """
 
 import difflib
 import itertools
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
-
-import mlflow
-from mlflow.entities import SpanType
-import fastmcp
-from starlette.applications import Starlette
 
 from paper_enrichment_agent.common import document_manipulators
 from paper_enrichment_agent.common.models import document as doc_models
@@ -47,7 +39,6 @@ class EnrichmentTools:
         """Returns the current state of the footnote being enriched."""
         return self._footnote
 
-    @mlflow.trace(name='EnrichmentTools:get_document_tree', span_type=SpanType.TOOL)
     def get_document_tree(self) -> DocumentTree:
         """Returns a tree representation of the reference document.
 
@@ -57,14 +48,15 @@ class EnrichmentTools:
         """
         return {
             'sections': [
-                self._convert_component_to_tree(section) for section in self._document.sections
+                self._convert_component_to_tree('/sections', section)
+                for section in self._document.sections
             ],
             'footnotes': [
-                self._convert_component_to_tree(footnote) for footnote in self._document.footnotes
+                self._convert_component_to_tree('/footnotes', footnote)
+                for footnote in self._document.footnotes
             ],
         }
 
-    @mlflow.trace(name='EnrichmentTools:set_footnote_title', span_type=SpanType.TOOL)
     def set_footnote_title(self, title: str) -> None:
         """Sets the title of the footnote being enriched.
 
@@ -83,7 +75,6 @@ class EnrichmentTools:
         """
         self._footnote.title = title
 
-    @mlflow.trace(name='EnrichmentTools:get_paragraph_content', span_type=SpanType.TOOL)
     def get_paragraph_content(self, path_to_paragraph: str) -> str:
         """Returns the content of a paragraph in the reference document.
 
@@ -104,7 +95,6 @@ class EnrichmentTools:
 
         return ''.join(e.str_content for e in stringified_elements)
 
-    @mlflow.trace(name='EnrichmentTools:get_figure_details', span_type=SpanType.TOOL)
     def get_figure_details(self, path_to_figure: str) -> str:
         """Returns the details describing a given figure in the reference document.
 
@@ -136,7 +126,6 @@ class EnrichmentTools:
             )
         )
 
-    @mlflow.trace(name='EnrichmentTools:extract_paragraph_citation', span_type=SpanType.TOOL)
     def extract_paragraph_citation(
         self, path_to_paragraph: str, begin_anchor: str, end_anchor: str
     ) -> None:
@@ -215,7 +204,6 @@ class EnrichmentTools:
 
         self._footnote.components.append(citation_paragraph)
 
-    @mlflow.trace(name='EnrichmentTools:extract_figure', span_type=SpanType.TOOL)
     def extract_figure(self, path_to_figure: str, subfigures_ids: list[str] | None) -> None:
         """Extracts a figure from the reference document and adds it to the footnote.
 
@@ -272,25 +260,35 @@ class EnrichmentTools:
 
         return paragraph
 
-    def _convert_component_to_tree(self, component: doc_models.DocumentComponent) -> DocumentTree:
+    def _convert_component_to_tree(
+        self, root_path: str, component: doc_models.DocumentComponent
+    ) -> DocumentTree:
         """Converts a document component to its tree representation."""
+
+        component_path = f'{root_path}/{component.component_id}'
 
         base_repr: dict[str, EnrichmentTools.DocumentTree] = {
             'type': component.__class__.__name__,
-            'id': component.component_id,
+            'component_path': component_path,
         }
 
         if isinstance(component, doc_models.Section):
             return {
                 **base_repr,
                 'title': component.title,
-                'components': [self._convert_component_to_tree(c) for c in component.components],
+                'components': [
+                    self._convert_component_to_tree(component_path, comp)
+                    for comp in component.components
+                ],
             }
 
         if isinstance(component, doc_models.List):
             return {
                 **base_repr,
-                'items': [self._convert_component_to_tree(i) for i in component.items],
+                'items': [
+                    self._convert_component_to_tree(component_path, item)
+                    for item in component.items
+                ],
             }
 
         if isinstance(component, doc_models.Figure):
@@ -300,82 +298,3 @@ class EnrichmentTools:
             }
 
         return base_repr
-
-
-class EnrichmentContextManager:
-    """Manages the setup and teardown of the footnote-enrichment MCP tools state.
-
-    The enrichment context manager creates and stores the state of the footnote-enrichment tools,
-    which are exposed within MCP server to the LLM-based enrichment agent. The tools state is
-    initialized for each agent session and may be reused on enrichment continuation.
-    """
-
-    class EnrichmentContextManagerError(Exception):
-        """Base class for exceptions raised by the `EnrichmentContextManager`."""
-
-    def __init__(self) -> None:
-
-        self._tools_states: dict[str, EnrichmentTools] = {}
-        self._mcp_endpoints: dict[str, Starlette] = {}
-
-    def get_mcp_app_for_agent_session(self, session_id: str) -> Starlette:
-        """Returns the MCP app for a footnote-enrichment agent session.
-
-        Args:
-            session_id: The unique identifier of the footnote-enrichment agent session.
-        """
-
-        if session_id not in self._mcp_endpoints:
-            raise self.EnrichmentContextManagerError(
-                f'MCP endpoint for session {session_id} is not set up.'
-            )
-
-        return self._mcp_endpoints[session_id]
-
-    @asynccontextmanager
-    async def setup_mcp_for_agent_session(
-        self, session_id: str, reference_document: doc_models.Document | None
-    ) -> AsyncGenerator[EnrichmentTools, None]:
-        """Sets up a child MCP endpoint for a footnote-enrichment agent session.
-
-        The exposed MCP is attached to the primary MCP root endpoint and delegates the
-        footnote-enrichment tool calls to the created / reused enrichment tools state.
-
-        Args:
-            session_id: The unique identifier of the footnote-enrichment agent session.
-            reference_document: The document referenced by the survey, which is used to
-                initialize the enrichment tools state. If None, the existing tools state is reused.
-        """
-
-        if not reference_document:
-            if session_id not in self._tools_states:
-                raise self.EnrichmentContextManagerError(
-                    f'Cannot setup MCP for session {session_id} without a reference document.'
-                )
-
-        else:
-            self._tools_states[session_id] = EnrichmentTools(reference_document)
-
-        tools_state = self._tools_states[session_id]
-
-        mcp_server = fastmcp.FastMCP(
-            name=f'footnote_enrichment_tools_{session_id}',
-            on_duplicate='error',
-            strict_input_validation=True,
-        )
-
-        mcp_server.tool(tools_state.get_document_tree, name='get_document_tree')
-        mcp_server.tool(tools_state.set_footnote_title, name='set_footnote_title')
-        mcp_server.tool(tools_state.get_paragraph_content, name='get_paragraph_content')
-        mcp_server.tool(tools_state.get_figure_details, name='get_figure_details')
-        mcp_server.tool(tools_state.extract_paragraph_citation, name='extract_paragraph_citation')
-        mcp_server.tool(tools_state.extract_figure, name='extract_figure')
-
-        mcp_endpoint = mcp_server.http_app(transport='streamable-http')
-        self._mcp_endpoints[session_id] = mcp_endpoint
-
-        try:
-            async with mcp_endpoint.router.lifespan_context(mcp_endpoint):
-                yield tools_state
-        finally:
-            self._mcp_endpoints.pop(session_id)

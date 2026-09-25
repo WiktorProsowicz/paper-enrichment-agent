@@ -1,12 +1,12 @@
 import pytest
 
-from paper_enrichment_agent.footnote_enrichment_agent.components import enrichment_context
+from paper_enrichment_agent.footnote_enrichment_agent.components import enrichment_tools
 from paper_enrichment_agent.common.models import document as doc_models
 
 
 @pytest.fixture
 def sample_enrichment_tools():
-    return enrichment_context.EnrichmentTools(
+    return enrichment_tools.EnrichmentTools(
         doc_models.Document(
             title='Sample Document',
             abstract='Sample abstract',

@@ -3,6 +3,9 @@ from unittest.mock import MagicMock, AsyncMock
 
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models.misc import FootnoteEnrichmentRequest
+from paper_enrichment_agent.footnote_enrichment_agent.components.enrichment_context_manager import (
+    EnrichmentContextManager,
+)
 from paper_enrichment_agent.footnote_enrichment_agent.service import FootnoteEnrichmentAgentService
 
 
@@ -58,13 +61,32 @@ def sample_enrichment_request(sample_reference_document):
 
 
 @pytest.fixture
-def mock_enrichment_context_manager():
-    enrichment_context_manager = MagicMock()
-    enrichment_tools = MagicMock()
-    enrichment_context_manager.setup_mcp_for_agent_session.return_value.__aenter__.return_value = (
-        enrichment_tools
+def mock_enrichment_context_manager(sample_footnote):
+    """Mocks the manager running the enrichment context of a session."""
+
+    manager = MagicMock(spec=EnrichmentContextManager)
+    manager.setup_mcp_for_agent_session.return_value.__aenter__.return_value = None
+    manager.get_footnote_state.return_value = sample_footnote
+
+    return manager
+
+
+@pytest.fixture(scope='session')
+def sample_footnote():
+    return doc_models.Section(
+        title='Enriched Footnote',
+        components=[
+            doc_models.Figure(
+                caption='Sample Figure Caption',
+                subfigures=[
+                    doc_models.ImgSubfigure(
+                        caption='Sample Subfigure Caption',
+                        image_src='https://example.com/sample_image.png',
+                    )
+                ],
+            )
+        ],
     )
-    return enrichment_context_manager, enrichment_tools
 
 
 @pytest.fixture(autouse=True)
@@ -80,72 +102,72 @@ def mock_metrics():
 
 
 class TestReferenceToFootnote:
-    @pytest.fixture(scope='class')
-    @classmethod
-    def sample_footnote(cls):
-        return doc_models.Section(
-            title='Enriched Footnote',
-            components=[
-                doc_models.Figure(
-                    caption='Sample Figure Caption',
-                    subfigures=[
-                        doc_models.ImgSubfigure(
-                            caption='Sample Subfigure Caption',
-                            image_src='https://example.com/sample_image.png',
-                        )
-                    ],
-                )
-            ],
-        )
-
-    @pytest.fixture(scope='class')
-    @classmethod
-    def mock_agent(cls, sample_footnote):
-        agent = AsyncMock()
-        agent.invoke.return_value = sample_footnote
-        return agent
-
     @pytest.mark.asyncio
     async def test_enriches_footnote_properly(
         self,
         sample_enrichment_request,
-        mock_agent,
         sample_footnote,
         mock_enrichment_context_manager,
         mock_metrics,
     ):
-        enrichment_context_manager, enrichment_tools = mock_enrichment_context_manager
+        agent = AsyncMock()
+        agent.invoke.return_value = 'The footnote has been composed.'
 
         service = FootnoteEnrichmentAgentService(
             metrics=mock_metrics,
-            enrichment_context_manager=enrichment_context_manager,
-            enrichment_agent=mock_agent,
+            enrichment_context_manager=mock_enrichment_context_manager,
+            enrichment_agent=agent,
         )
 
         result = await service.reference_to_footnote(sample_enrichment_request)
 
         assert result == sample_footnote
-        mock_agent.invoke.assert_called_once_with(sample_enrichment_request, enrichment_tools)
+
+        mock_enrichment_context_manager.setup_mcp_for_agent_session.assert_called_once_with(
+            sample_enrichment_request.session_id, sample_enrichment_request.reference_document
+        )
+        agent.invoke.assert_called_once_with(sample_enrichment_request)
+        mock_enrichment_context_manager.get_footnote_state.assert_called_once_with(
+            sample_enrichment_request.session_id
+        )
 
         assert mock_metrics.enrichment_time.observe.call_args.args[0] >= 0
         mock_metrics.enrichment_requests.labels.assert_called_once_with(status='success')
 
     @pytest.mark.asyncio
-    async def test_handles_enrichment_context_manager_error(
-        self, mock_metrics, sample_enrichment_request, mock_agent, mock_enrichment_context_manager
+    async def test_handles_enrichment_context_error(
+        self, mock_metrics, sample_enrichment_request, mock_enrichment_context_manager
     ):
-        enrichment_context_manager, _ = mock_enrichment_context_manager
-        enrichment_context_manager.setup_mcp_for_agent_session.side_effect = (
-            FootnoteEnrichmentAgentService.FootnoteEnrichmentAgentError(
-                'Failed to set up enrichment context for agent session'
-            )
+        mock_enrichment_context_manager.setup_mcp_for_agent_session.side_effect = (
+            EnrichmentContextManager.EnrichmentContextManagerError('Failed to set up the context.')
         )
 
         service = FootnoteEnrichmentAgentService(
             metrics=mock_metrics,
-            enrichment_context_manager=enrichment_context_manager,
-            enrichment_agent=mock_agent,
+            enrichment_context_manager=mock_enrichment_context_manager,
+            enrichment_agent=AsyncMock(),
         )
 
         with pytest.raises(FootnoteEnrichmentAgentService.FootnoteEnrichmentAgentError):
             await service.reference_to_footnote(sample_enrichment_request)
+
+        mock_metrics.enrichment_requests.labels.assert_called_once_with(status='failure')
+
+    @pytest.mark.asyncio
+    async def test_handles_missing_footnote_state(
+        self, mock_metrics, sample_enrichment_request, mock_enrichment_context_manager
+    ):
+        mock_enrichment_context_manager.get_footnote_state.side_effect = (
+            EnrichmentContextManager.EnrichmentContextManagerError('No tools state is set up.')
+        )
+
+        service = FootnoteEnrichmentAgentService(
+            metrics=mock_metrics,
+            enrichment_context_manager=mock_enrichment_context_manager,
+            enrichment_agent=AsyncMock(),
+        )
+
+        with pytest.raises(FootnoteEnrichmentAgentService.FootnoteEnrichmentAgentError):
+            await service.reference_to_footnote(sample_enrichment_request)
+
+        mock_metrics.enrichment_requests.labels.assert_called_once_with(status='failure')

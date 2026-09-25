@@ -22,9 +22,11 @@ from starlette.types import Receive, Scope, Send
 from paper_enrichment_agent.common import logging_setup, mlflow_setup
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models import misc as misc_models
-from paper_enrichment_agent.footnote_enrichment_agent.components import enrichment_context
 from paper_enrichment_agent.footnote_enrichment_agent.components.agent import (
     FootnoteEnrichmentAgent,
+)
+from paper_enrichment_agent.footnote_enrichment_agent.components.enrichment_context_manager import (
+    EnrichmentContextManager,
 )
 from paper_enrichment_agent.footnote_enrichment_agent.service import (
     FootnoteEnrichmentAgentService,
@@ -71,14 +73,14 @@ class AppCfg(pydantic.BaseModel):
         ),
     ]
     llm_api_key: Annotated[
-        str,
+        pydantic.SecretStr,
         Field(description='The API key for the LLM used by the footnote enrichment agent'),
     ]
 
 
 def create_app(
     service: FootnoteEnrichmentAgentService,
-    enrichment_context_manager: enrichment_context.EnrichmentContextManager,
+    enrichment_context_manager: EnrichmentContextManager,
 ) -> fastapi.FastAPI:
     """Creates a FastAPI application for the `footnote_enrichment_agent` service."""
 
@@ -109,6 +111,8 @@ def create_app(
         return await service.reference_to_footnote(request)
 
     class MCPDispatch:
+        """Delegates the requests of the agent's MCP client to the session-specific MCP app."""
+
         async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
             session_id = scope['path_params']['session_id']
             mcp_endpoint = enrichment_context_manager.get_mcp_app_for_agent_session(session_id)
@@ -125,7 +129,7 @@ def create_app(
         Route(
             path='/mcp/{session_id:path}',
             endpoint=MCPDispatch(),
-            methods=['GET', 'POST'],
+            methods=['GET', 'POST', 'DELETE'],
         )
     )
 
@@ -143,11 +147,13 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
 
     mlflow_setup.setup_mlflow(app_cfg.mlflow_cfg)
 
-    enrichment_context_manager = enrichment_context.EnrichmentContextManager()
+    enrichment_context_manager = EnrichmentContextManager()
 
     enrichment_agent = FootnoteEnrichmentAgent(
         llm=ChatLiteLLM(
-            model=app_cfg.agent_llm_model, api_key=app_cfg.llm_api_key, **app_cfg.agent_llm_params
+            model=app_cfg.agent_llm_model,
+            api_key=app_cfg.llm_api_key.get_secret_value(),
+            **app_cfg.agent_llm_params,
         ),
         cfg=app_cfg.agent_cfg,
     )
@@ -158,10 +164,7 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
         enrichment_agent=enrichment_agent,
     )
 
-    app = create_app(
-        service=service,
-        enrichment_context_manager=enrichment_context_manager,
-    )
+    app = create_app(service=service, enrichment_context_manager=enrichment_context_manager)
 
     uvicorn.run(app, host='0.0.0.0', port=app_cfg.app_port)
 

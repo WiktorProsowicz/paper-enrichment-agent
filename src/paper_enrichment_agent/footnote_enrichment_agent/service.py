@@ -17,7 +17,7 @@ from paper_enrichment_agent.common.models.misc import FootnoteEnrichmentRequest
 from paper_enrichment_agent.footnote_enrichment_agent.components.agent import (
     FootnoteEnrichmentAgent,
 )
-from paper_enrichment_agent.footnote_enrichment_agent.components.enrichment_context import (
+from paper_enrichment_agent.footnote_enrichment_agent.components.enrichment_context_manager import (
     EnrichmentContextManager,
 )
 
@@ -46,6 +46,10 @@ class FootnoteEnrichmentAgentService:
     async def reference_to_footnote(self, request: FootnoteEnrichmentRequest) -> doc_models.Section:
         """Calls the footnote enrichment agent to compose a footnote from the given document.
 
+        The enrichment context, which serves the MCP endpoint called by the agent, is set up for
+        the time of the agent session. The composed footnote is then read from the enrichment
+        context manager.
+
         Args:
             request: The footnote enrichment request data.
         """
@@ -53,29 +57,32 @@ class FootnoteEnrichmentAgentService:
         try:
             async with self._enrichment_context_manager.setup_mcp_for_agent_session(
                 request.session_id, request.reference_document
-            ) as enrichment_tools:
+            ):
                 start_time = time.perf_counter()
-                footnote = await self._enrichment_agent.invoke(request, enrichment_tools)
+                agent_summary = await self._enrichment_agent.invoke(request)
                 end_time = time.perf_counter()
 
-                self._metrics.enrichment_time.observe(end_time - start_time)
-                self._metrics.enrichment_requests.labels(status='success').inc()
+                footnote = self._enrichment_context_manager.get_footnote_state(request.session_id)
 
-                _logger().info(
-                    'Successfully enriched footnote for agent session',
-                    session_id=request.session_id,
-                    survey_title=request.survey_title,
-                    reference_document_title=request.reference_document.title,
-                )
+            self._metrics.enrichment_time.observe(end_time - start_time)
+            self._metrics.enrichment_requests.labels(status='success').inc()
 
-                return footnote
+            _logger().info(
+                'Successfully enriched footnote for agent session',
+                session_id=request.session_id,
+                survey_title=request.survey_title,
+                reference_document_title=request.reference_document.title,
+                agent_summary=agent_summary,
+            )
+
+            return footnote
 
         except EnrichmentContextManager.EnrichmentContextManagerError as e:
             self._metrics.enrichment_requests.labels(status='failure').inc()
-            _logger().error('Failed to set up enrichment context for agent session', error=str(e))
+            _logger().error('Failed to enrich footnote for agent session', error=str(e))
 
             raise self.FootnoteEnrichmentAgentError(
-                'Failed to set up enrichment context for agent session'
+                'Failed to enrich footnote for agent session'
             ) from e
 
 
