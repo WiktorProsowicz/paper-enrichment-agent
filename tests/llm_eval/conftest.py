@@ -28,6 +28,20 @@ def pytest_configure(config: pytest.Config) -> None:
         raise pytest.UsageError('tests/llm_eval requires the MLflow pytest plugin')
 
 
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]):
+    """Stores the reports of the test phases on the item, so that fixtures can read the outcome.
+
+    The message of the exception raised by the test, if any, is stored alongside the report.
+    """
+    outcome = yield
+    report: pytest.TestReport = outcome.get_result()
+    setattr(item, f'report_{report.when}', report)
+
+    if report.when == 'call' and call.excinfo is not None:
+        item.failure_message = call.excinfo.exconly()  # type: ignore[attr-defined]
+
+
 def pytest_addoption(parser: pytest.Parser):
     parser.addoption(
         '--llm-eval-cfg', action='store', default='{}', help='JSON-serialized Hydra configuration'
@@ -69,6 +83,7 @@ def _mlflow_connected(_evaluation_config: harness_core.EvaluationConfig) -> None
     os.environ['MLFLOW_GENAI_EVAL_MAX_SCORER_WORKERS'] = '2'
     os.environ['MLFLOW_GENAI_EVAL_MAX_RETRIES'] = '3'
     os.environ['MLFLOW_GENAI_EVAL_LLM_TIMEOUT'] = '120'
+    os.environ['MLFLOW_GENAI_EVAL_ASYNC_TIMEOUT'] = '600'
     os.environ['MLFLOW_GENAI_EVAL_SKIP_TRACE_VALIDATION'] = 'true'
 
     mlflow_setup.setup_mlflow(
@@ -85,7 +100,8 @@ def suite_run(
 ) -> Generator[harness_core.EvaluationRun, None, None]:
     """Sets up connection with the mlflow server and prepares evaluation run.
 
-    This fixture should be injected to each @mlflow.test decorated test case.
+    This fixture should be injected to each @mlflow.test decorated test case. The run is marked as
+    failed if the test case fails.
     """
 
     mlflow.set_experiment(suite_name)
@@ -98,6 +114,17 @@ def suite_run(
             yield harness_core.EvaluationRun(
                 mlflow_run=run, suite_config=_evaluation_config.suite_configs[suite_name]
             )
+
+            call_report: pytest.TestReport | None = getattr(request.node, 'report_call', None)
+
+            if call_report is None or call_report.failed:
+                failure_message = getattr(
+                    request.node, 'failure_message', 'The test case did not run.'
+                )
+                mlflow.set_tag(
+                    'mlflow.note.content', f'**Test case failed**\n\n```\n{failure_message}\n```'
+                )
+                mlflow.end_run(status='FAILED')
 
     finally:
         mlflow_plugin_session._run_id = None

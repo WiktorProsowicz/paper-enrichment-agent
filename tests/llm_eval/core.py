@@ -60,16 +60,17 @@ def validate_results(run_id: str, result: EvaluationResult, thresholds: dict[str
         MLflow's failure message, or an empty string when every scorer cleared its
         threshold.
     """
-    active_thresholds = {
-        f'{name}/mean': MetricThreshold(threshold=value, greater_is_better=True)
-        for name, value in thresholds.items()
-        if f'{name}/mean' in result.metrics
-    }
 
     failure_reason: str | None = None
 
     try:
-        mlflow.validate_evaluation_results(active_thresholds, candidate_result=result)
+        mlflow.validate_evaluation_results(
+            validation_thresholds={
+                f'{name}/mean': MetricThreshold(threshold=value, greater_is_better=True)
+                for name, value in thresholds.items()
+            },
+            candidate_result=result,
+        )
     except ModelValidationFailedException as e:
         failure_reason = str(e)
 
