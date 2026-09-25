@@ -3,10 +3,6 @@ name: llm-eval
 services:
   footnote-enrichment-agent:
     image: app-base:runtime
-    build:
-      dockerfile: infrastructure/app-base.Dockerfile
-      context: ..
-      target: runtime
     container_name: llm-eval-footnote-enrichment-agent
     restart: unless-stopped
     command:
@@ -24,10 +20,6 @@ services:
     
   eval-runner:
     image: app-base:eval
-    build:
-      dockerfile: infrastructure/app-base.Dockerfile
-      context: ..
-      target: eval
     restart: no
     container_name: llm-eval-eval-runner
     command:

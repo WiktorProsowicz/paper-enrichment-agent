@@ -19,8 +19,10 @@ run_local_checks:
 run_unit_tests:
     #!/usr/bin/env bash
     set -euo pipefail
+    docker build -t app-base:eval --target eval -f infrastructure/app-base.Dockerfile .
     docker compose -f infrastructure/unit-tests.yaml up --build --abort-on-container-failure
 
+# Sets up a local MLFlow server for running evaluation pipelines
 setup_mlflow_server:
     #!/usr/bin/env bash
     echo "Setting up MLflow server..."
@@ -30,9 +32,9 @@ setup_mlflow_server:
         exit 1
     fi
 
-    export $(cat mlflow.env | xargs)
-    docker compose -f infrastructure/mlflow-server.yaml up -d
+    docker compose -f infrastructure/mlflow-server.yaml --env-file mlflow.env up -d
 
+# Cleans up and rebuilds the local MLFlow server
 setup_mlflow_server_clean:
     #!/usr/bin/env bash
     echo "Cleaning up MLflow server..."
@@ -42,21 +44,22 @@ setup_mlflow_server_clean:
         exit 1
     fi
 
-    export $(cat mlflow.env | xargs)
+    docker compose -f infrastructure/mlflow-server.yaml --env-file mlflow.env down -v
+    docker compose -f infrastructure/mlflow-server.yaml --env-file mlflow.env up --build -d
 
-    docker compose -f infrastructure/mlflow-server.yaml down -v
-    docker compose -f infrastructure/mlflow-server.yaml up --build -d
-
+# Runs the LLM evaluation pipeline
 run_llm_eval:
     #!/usr/bin/env bash
     echo "Cleaning up MLflow server..."
+
+    docker build -t app-base:eval --target eval -f infrastructure/app-base.Dockerfile .
+    docker build -t app-base:runtime --target runtime -f infrastructure/app-base.Dockerfile .
 
     if [ ! -f llm-eval.env ]; then
         echo "llm-eval.env file not found. Please create it with the necessary environment variables."
         exit 1
     fi
 
-    export $(cat llm-eval.env | xargs)
-
-    docker compose -f infrastructure/llm-eval.yaml down -v
-    docker compose -f infrastructure/llm-eval.yaml up --build --attach eval-runner --abort-on-container-exit --exit-code-from eval-runner
+    docker compose -f infrastructure/llm-eval.yaml --env-file llm-eval.env down -v
+    docker compose -f infrastructure/llm-eval.yaml --env-file llm-eval.env up \
+        --build --attach eval-runner --abort-on-container-exit --exit-code-from eval-runner

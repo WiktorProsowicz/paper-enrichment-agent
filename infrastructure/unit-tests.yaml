@@ -15,10 +15,7 @@ services:
       "
 
   pytest:
-    build:
-      dockerfile: infrastructure/app-base.Dockerfile
-      context: ..
-      target: eval
+    image: app-base:eval
     restart: no
     environment:
       COVERAGE_FILE: /opt/app/test_results/.coverage
@@ -40,10 +37,7 @@ services:
 
 
   coverage:
-    build:
-      dockerfile: infrastructure/app-base.Dockerfile
-      context: ..
-      target: eval
+    image: app-base:eval
     restart: no
     environment:
       COVERAGE_FILE: /opt/app/test_results/.coverage
