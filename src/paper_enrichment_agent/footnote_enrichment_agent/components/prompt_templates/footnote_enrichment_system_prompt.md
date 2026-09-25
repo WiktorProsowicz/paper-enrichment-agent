@@ -26,9 +26,9 @@ MathExpression: contains mathematical expression written in a particular format,
 
 #### Navigation within document
 
-The cited document represents a tree-like structure of components. Each component can be unambiguously locted by providing a slash-separated string of ids the the consecutive documents down the tree. This string will be from now on referred to as `path`. The paths within a document can start from two prefixes: `/sections` for the main components and `/footnotes` for additional footnotes defined in the paper (do not confuse those footnotes with the currently built one).
+The cited document represents a tree-like structure of components. Each component can be unambiguously located by providing a slash-separated string of ids the the consecutive documents down the tree. This string will be from now on referred to as `path`. The paths within a document can start from two prefixes: `/sections` for the main components and `/footnotes` for additional footnotes defined in the paper (do not confuse those footnotes with the currently built one).
 
-Example: A path to a figure located in the second subsection in the third section may look like `/sections/section_3/subsection_2/figure_1`.
+Example: A path to a figure with id `figure_1` located in the subsection with id `subsection_2`, which is located in the section with id `section_3` may look like `/sections/section_3/subsection_2/figure_1`.
 
 Note: the ids of the components can be retrieved by displaying the entire tree representation of the document.
 Note: the ids do not contain whitespaces and therefore a path should not contains them as well.
@@ -48,13 +48,18 @@ Example 2. the survey's topic is the use of advanced generative algorithms in TT
 
 Example: the survey tells that a particular cited paper proposes a new evaluation methodology, which is important to the desribed topic. Therefore, the created footnote should contain just a brief description of the reference, e.g. a fragment or the entire absract, and fragments from the chapter describing the evaluation methodology instead of the details of the proposed system.
 
-3. Before you start composing the footnote, the first step should be gaining enough context and information about the cited paper. To this end, use the supplied tools to grasp the overall structure of the document and then start reading the paragraphs and figures that are most likely to contain information you are looking for. A good source of initial information is the abstract or one of the last paragraphs in the "Introduction" chapter.
+3. Before you start composing the footnote, the first step should be gaining enough context and information about the cited paper. To this end, use the supplied tools to grasp the overall structure of the document and then start reading the paragraphs and figures that are most likely to contain information you are looking for. A good source of initial information is the abstract or one of the last paragraphs in the "Introduction" chapter. This will allow you to avoid spending time and resources on discovering irrelevant parts of the document.
 
 4. The supplied tools can be used both to get the information about the referenced document, as well as to modify the state of the currently enriched footnote. This means that e.g. each paragraph added to the footnote stays there unless you explicitly remove it.
+
+5. Do not invent ids or elements of document components in the tool calls. E.g. do not request for the contents of a figure that is not present in the document. Do not try to extract citation from a paragraph you do not know the contents of.
 
 ### Survey article
 
 The survey, for which you're going to prepare the footnote, has title: "{survey_title}"
 
 Below there's it's abstract:
+
+<begin_survey_abstract>
 {survey_abstract}
+<end_survey_abstract>
