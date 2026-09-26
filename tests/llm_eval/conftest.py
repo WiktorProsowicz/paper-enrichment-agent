@@ -10,9 +10,9 @@ test case.
 
 from collections.abc import Generator
 import os
+from typing import Any
 
 import mlflow
-import omegaconf
 
 import pytest
 from mlflow.pytest import session as mlflow_plugin_session
@@ -27,20 +27,22 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 @pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]):
+def pytest_runtest_makereport(
+    item: pytest.Item, call: pytest.CallInfo[None]
+) -> Generator[None, None, None]:
     """Stores the reports of the test phases on the item, so that fixtures can read the outcome.
 
     The message of the exception raised by the test, if any, is stored alongside the report.
     """
     outcome = yield
-    report: pytest.TestReport = outcome.get_result()
+    report: pytest.TestReport = outcome.get_result()  # type: ignore
     setattr(item, f'report_{report.when}', report)
 
     if report.when == 'call' and call.excinfo is not None:
         item.failure_message = call.excinfo.exconly()  # type: ignore[attr-defined]
 
 
-def pytest_addoption(parser: pytest.Parser):
+def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         '--llm-eval-cfg', action='store', default='{}', help='JSON-serialized Hydra configuration'
     )
@@ -65,7 +67,7 @@ def _evaluation_config(request: pytest.FixtureRequest) -> harness_core.Evaluatio
 @pytest.fixture(scope='module')
 def suite_config(
     suite_name: str, _evaluation_config: harness_core.EvaluationConfig
-) -> omegaconf.DictConfig:
+) -> dict[str, Any]:
     """Returns the configuration for the given test suite.
 
     See :func:`suite_name` for more details.

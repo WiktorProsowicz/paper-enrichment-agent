@@ -41,7 +41,6 @@ def test_footnote_enrichment_first_request(suite_run: harness_core.EvaluationRun
             survey_title=survey_doc.title,
             survey_abstract=survey_doc.abstract,
             reference_document=cited_doc,
-            reference_document_title=cited_doc.title,
             reference_id=inputs.reference_id,
             referencing_paragraph=referencing_paragraph,
             citation_context_info=inputs.citation_context,

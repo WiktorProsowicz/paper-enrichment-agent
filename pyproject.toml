@@ -78,7 +78,7 @@ omit = [
 ]
 
 [tool.mypy]
-disable_error_code = "import-untyped"
+disable_error_code = "import-untyped,no-untyped-call"
 strict = true
 exclude = ["tests/unit"]
 

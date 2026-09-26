@@ -3,6 +3,7 @@ import re
 
 import mlflow
 from mlflow.entities import SpanType, Trace
+from mlflow.entities.assessment import Feedback
 from mlflow.genai import Scorer, scorer
 from langchain_core.messages import SystemMessage
 from langchain_core.prompts import (
@@ -19,7 +20,6 @@ from paper_enrichment_agent.common.models import misc as misc_models
 from paper_enrichment_agent.common import document_manipulators
 from paper_enrichment_agent.footnote_enrichment_agent.components import doc_utils
 
-from mlflow.genai.evaluation.entities import Feedback
 from llm_eval import core as harness_core
 
 
@@ -111,7 +111,7 @@ def spawn_figure_usefulness_rating(llm: ChatLiteLLM) -> Scorer:
                 footnote_content=enriched_footnote_repr,
             )
         )
-        parsed_response = output_parser.parse(model_response.content)
+        parsed_response = output_parser.parse(str(model_response.content))
 
         return Feedback(
             value=parsed_response.rating,

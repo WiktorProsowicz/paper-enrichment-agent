@@ -11,7 +11,7 @@ import hydra
 import omegaconf
 from functools import cache
 
-import core as harness_core
+from . import core as harness_core
 from paper_enrichment_agent.common import logging_setup
 
 
@@ -47,6 +47,7 @@ def main(eval_cfg_dict: omegaconf.DictConfig) -> None:
             ],
             check=True,
         )
+        return
 
     _logger().info('Running active test suites.')
 

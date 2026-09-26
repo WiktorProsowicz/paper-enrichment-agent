@@ -15,7 +15,6 @@ from mlflow.models import MetricThreshold
 from mlflow.models.evaluation.validation import ModelValidationFailedException
 import pydantic
 from pydantic import Field
-import omegaconf
 
 
 class EvaluationConfig(pydantic.BaseModel):
@@ -46,10 +45,12 @@ class EvaluationRun:
     """
 
     mlflow_run: mlflow_entities.Run
-    suite_config: omegaconf.DictConfig
+    suite_config: dict[str, Any]
 
 
-def validate_results(run_id: str, result: EvaluationResult, thresholds: dict[str, float]) -> str:
+def validate_results(
+    run_id: str, result: EvaluationResult, thresholds: dict[str, float]
+) -> str | None:
     """Validates the aggregate scores and records the verdict on the run.
 
     Args:
@@ -61,7 +62,7 @@ def validate_results(run_id: str, result: EvaluationResult, thresholds: dict[str
         threshold.
     """
 
-    failure_reason: str | None = None
+    failure_reason: str | None
 
     try:
         mlflow.validate_evaluation_results(
@@ -69,7 +70,7 @@ def validate_results(run_id: str, result: EvaluationResult, thresholds: dict[str
                 f'{name}/mean': MetricThreshold(threshold=value, greater_is_better=True)
                 for name, value in thresholds.items()
             },
-            candidate_result=result,
+            candidate_result=result,  # type: ignore[arg-type]
         )
     except ModelValidationFailedException as e:
         failure_reason = str(e)
@@ -105,7 +106,7 @@ def load_dataset(
         ValueError: If the dataset holds no records.
         pydantic.ValidationError: If a record does not conform to the expected shape.
     """
-    dataset = mlflow.genai.get_dataset(name=dataset_name)
+    dataset: EvaluationDataset = mlflow.genai.get_dataset(name=dataset_name)
     records = dataset.to_df().to_dict(orient='records')
 
     if not records:
@@ -138,7 +139,9 @@ def scorer_with_typed_args() -> Callable[[Callable[..., Any]], mlflow.genai.Scor
     def decorate(score: Callable[..., Any]) -> mlflow.genai.Scorer:
         wanted_params_dict = get_type_hints(score)
 
-        def adapter(inputs: dict, outputs: Any, expectations: dict, trace: Any) -> Any:
+        def adapter(
+            inputs: dict[str, Any], outputs: Any, expectations: dict[str, Any], trace: Any
+        ) -> Any:
             available = {
                 'inputs': inputs,
                 'outputs': outputs,
@@ -169,8 +172,8 @@ def scorer_with_typed_args() -> Callable[[Callable[..., Any]], mlflow.genai.Scor
     return decorate
 
 
-def predict_with_typed_inputs(
-    predict_fn: Callable[[type[pydantic.BaseModel]], Any],
+def predict_with_typed_inputs[InputsType: pydantic.BaseModel](
+    predict_fn: Callable[[InputsType], Any],
 ) -> Callable[..., Any]:
     """Enables using a single `inputs` pydantic model for the predict function.
 
@@ -179,9 +182,9 @@ def predict_with_typed_inputs(
     for each field in the inputs dictionary, like `def predict(arg1, arg2, ...) -> Any`.
     """
 
-    inputs_type: type[pydantic.BaseModel] = next(iter(get_type_hints(predict_fn).values()))
+    inputs_type: type[InputsType] = next(iter(get_type_hints(predict_fn).values()))
 
-    def build_inputs(kwargs: dict[str, Any]) -> pydantic.BaseModel:
+    def build_inputs(kwargs: dict[str, Any]) -> InputsType:
         inputs_dict = {
             key: value for key, value in kwargs.items() if key in inputs_type.model_fields
         }
