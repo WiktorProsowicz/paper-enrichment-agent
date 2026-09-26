@@ -10,7 +10,7 @@ run_local_checks:
     @echo "Running pre-commit checks..."
     uv run pre-commit run --files `git ls-files --cached --others --exclude-standard`
     @echo "Running mypy type checks..."
-    uv run mypy src/paper_enrichment_agent
+    uv run mypy src/paper_enrichment_agent tests/llm_eval
     @echo "Running ruff checks..."
     uv run ruff check --diff
     uv run ruff format --check --diff
