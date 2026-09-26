@@ -21,7 +21,6 @@ from paper_enrichment_agent.footnote_enrichment_agent.components import doc_util
 
 from mlflow.genai.evaluation.entities import Feedback
 from llm_eval import core as harness_core
-from llm_eval.suites.test_footnote_enrichment import data as harness_data
 
 
 AGENT_INVOCATION_SPAN_NAME = 'FootnoteEnrichmentAgent::invoke'

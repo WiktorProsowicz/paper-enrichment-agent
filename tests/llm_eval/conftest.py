@@ -10,7 +10,6 @@ test case.
 
 from collections.abc import Generator
 import os
-import pathlib
 
 import mlflow
 import omegaconf
@@ -20,7 +19,6 @@ from mlflow.pytest import session as mlflow_plugin_session
 from llm_eval import core as harness_core
 
 from paper_enrichment_agent.common import mlflow_setup
-from paper_enrichment_agent.common import logging_setup
 
 
 def pytest_configure(config: pytest.Config) -> None:
