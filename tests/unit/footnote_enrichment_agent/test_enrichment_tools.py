@@ -102,32 +102,32 @@ class TestEnrichmentContext:
             'sections': [
                 {
                     'type': 'Section',
-                    'id': 'section_1',
+                    'component_path': '/sections/section_1',
                     'title': 'Sample Section',
                     'components': [
-                        {'type': 'Paragraph', 'id': 'paragraph_1'},
+                        {'type': 'Paragraph', 'component_path': '/sections/section_1/paragraph_1'},
                         {
                             'type': 'List',
-                            'id': 'list_1',
+                            'component_path': '/sections/section_1/list_1',
                             'items': [
                                 {
                                     'type': 'Paragraph',
-                                    'id': 'list_item_1',
+                                    'component_path': '/sections/section_1/list_1/list_item_1',
                                 },
                                 {
                                     'type': 'Paragraph',
-                                    'id': 'list_item_2',
+                                    'component_path': '/sections/section_1/list_1/list_item_2',
                                 },
                             ],
                         },
                         {
                             'type': 'Section',
-                            'id': 'nested_section',
+                            'component_path': '/sections/section_1/nested_section',
                             'title': 'Nested Section',
                             'components': [
                                 {
                                     'type': 'Figure',
-                                    'id': 'figure_1',
+                                    'component_path': '/sections/section_1/nested_section/figure_1',
                                     'caption': 'Sample figure caption.',
                                 }
                             ],
@@ -138,7 +138,7 @@ class TestEnrichmentContext:
             'footnotes': [
                 {
                     'type': 'Paragraph',
-                    'id': 'footnote_1',
+                    'component_path': '/footnotes/footnote_1',
                 }
             ],
         }
