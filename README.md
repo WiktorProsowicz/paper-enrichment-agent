@@ -32,7 +32,7 @@ You realize that you are unlikely to grasp the topic fully without additional co
 
 ### Eval setup
 
-The evaluation is based on `mlflow` and its `pytest` plugin. The module hierarchy of the evaluation code is shown below: 
+The evaluation is based on `mlflow` and its `pytest` plugin. The module hierarchy of the evaluation code is shown below:
 
 ```yaml
 tests/llm_eval:
@@ -41,7 +41,7 @@ tests/llm_eval:
         test_footnote_enrichment:
             # Suite-specific setup - defines at least the experiment name.
             conftest.py
-            # 
+            #
             data.py
             # Defines particular evaluators of the traces produced for each data sample.
             # This is the place where the LLM Judges should be placed as well.
@@ -60,7 +60,7 @@ core.py
 run_eval.py
 ```
 
-A single suite is supposed to correspond with a single MLFlow experiment. A single process run is meant to correspond with a single MLFlow run, therefore only one suite is allowed to be run at once. 
+A single suite is supposed to correspond with a single MLFlow experiment. A single process run is meant to correspond with a single MLFlow run, therefore only one suite is allowed to be run at once.
 
 ## Changelog
 

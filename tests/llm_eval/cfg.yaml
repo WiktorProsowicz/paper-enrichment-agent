@@ -1,16 +1,15 @@
-mlflow_tracking_uri: "http://mlflow:5000"
-active_suites: [
-  'test_footnote_enrichment'
-]
+---
+mlflow_tracking_uri: http://mlflow:5000
+active_suites: [test_footnote_enrichment]
 
 suite_configs:
   test_footnote_enrichment:
-    footnote_enrichment_service_url: "http://footnote-enrichment-agent:8081"
+    footnote_enrichment_service_url: http://footnote-enrichment-agent:8081
     enrichment_service_request_timeout: 1800
 
     datasets:
-      footnote_enrichment: "footnote_enrichment_ds/v1"
-    
+      footnote_enrichment: footnote_enrichment_ds/v1
+
     thresholds:
       footnote_enrichment:
         figure_usefulness_rating: 4.0
@@ -20,7 +19,7 @@ suite_configs:
         agent_action_count: 0.0
         revealed_paragraphs: 0.0
         revealed_figures: 0.0
-    
+
     judge_llm_config:
       model_name: deepinfra/meta-llama/Llama-3.3-70B-Instruct-Turbo
       api_key: JUDGE_LLM_API_KEY
