@@ -178,7 +178,7 @@ class TestArxivParser:
         assert 'FastSpeech 2' in second_figure_subfigures[1].table_contents
         second_figure_subfigures[1].caption == '(b) CMOS comparison.'
 
-    def test_parses_correct_figures(self, mock_example_paper):
+    def test_parses_correct_img_figures(self, mock_example_paper):
 
         parser = ArxivParser()
         document = parser.parse(EXAMPLE_PAPER_1)
@@ -204,6 +204,24 @@ class TestArxivParser:
             == 'https://ar5iv.labs.arxiv.org/html/1905.09263/assets/x4.png'
         )
         assert first_figure_subfigures[3].caption == '(d) Duration Predictor'
+
+    def test_parses_correct_svg_figures(self, mock_example_paper):
+
+        parser = ArxivParser()
+        document = parser.parse(EXAMPLE_PAPER_4)
+
+        doc_getter = DocumentGetter(document)
+
+        all_figures = list(doc_getter.iter_components_of_type(doc_models.Figure))
+        figure_captions = [figure.caption for figure in all_figures]
+
+        assert 'Figure 1: The graphical illustration of the proposed model' in figure_captions[0]
+
+        assert len(all_figures[0].subfigures) == 1
+        assert (
+            all_figures[0].subfigures[0].image_src
+            == 'https://ar5iv.labs.arxiv.org/html/1409.0473/assets/rnnsearch.svg'
+        )
 
     def test_parses_correct_equations(self, mock_example_paper):
 

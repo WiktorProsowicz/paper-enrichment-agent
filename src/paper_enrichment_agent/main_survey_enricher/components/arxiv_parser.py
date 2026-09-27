@@ -244,12 +244,12 @@ class ArxivParser:
             description='Figure',
         )
 
-        for subfigure_tag in figure_tag.select('img.ltx_graphics, table.ltx_tabular'):
+        for subfigure_tag in figure_tag.select('.ltx_graphics, table.ltx_tabular'):
             subcaption_tag = subfigure_tag.find_next_sibling(class_='ltx_caption')
 
             subcaption = self._extract_clean_text(subcaption_tag) if subcaption_tag else None
 
-            if 'img' in subfigure_tag.name:
+            if subfigure_tag.name == 'img':
                 figure.subfigures.append(
                     doc_models.ImgSubfigure(
                         description='Image subfigure',
@@ -257,6 +257,16 @@ class ArxivParser:
                         caption=subcaption,
                     )
                 )
+
+            elif subfigure_tag.name == 'object' and subfigure_tag.get('type') == 'image/svg+xml':
+                figure.subfigures.append(
+                    doc_models.ImgSubfigure(
+                        description='SVG image subfigure',
+                        image_src=str(subfigure_tag['data']),
+                        caption=subcaption,
+                    )
+                )
+
             else:
                 figure.subfigures.append(
                     doc_models.TableSubfigure(
