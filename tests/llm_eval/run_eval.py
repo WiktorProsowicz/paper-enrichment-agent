@@ -11,7 +11,7 @@ import hydra
 import omegaconf
 from functools import cache
 
-from . import core as harness_core
+import core as harness_core  # type: ignore
 from paper_enrichment_agent.common import logging_setup
 
 
