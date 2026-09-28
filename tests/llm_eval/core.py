@@ -56,18 +56,18 @@ def validate_results(
     Args:
         run_id: The run opened for the test case being scored.
         result: What ``mlflow.genai.evaluate`` returned.
+        thresholds: Minimal mean value per scorer. Scorers left out are only logged.
 
     Returns:
-        MLflow's failure message, or an empty string when every scorer cleared its
-        threshold.
+        MLflow's failure message, or None when every scorer cleared its threshold.
     """
 
-    failure_reason: str | None
+    failure_reason: str | None = None
 
     try:
         mlflow.validate_evaluation_results(
             validation_thresholds={
-                f'{name}/mean': MetricThreshold(threshold=value, greater_is_better=True)
+                name: MetricThreshold(threshold=value, greater_is_better=True)
                 for name, value in thresholds.items()
             },
             candidate_result=result,  # type: ignore[arg-type]
