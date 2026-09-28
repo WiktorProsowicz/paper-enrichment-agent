@@ -99,7 +99,6 @@ class EnrichmentContextManager:
             strict_input_validation=True,
         )
 
-        mcp_server.tool(tools_state.get_document_tree, name='get_document_tree')
         mcp_server.tool(tools_state.set_footnote_title, name='set_footnote_title')
         mcp_server.tool(tools_state.get_paragraph_content, name='get_paragraph_content')
         mcp_server.tool(tools_state.get_figure_details, name='get_figure_details')

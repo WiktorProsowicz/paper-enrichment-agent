@@ -5,6 +5,11 @@ Below there's its abstract:
 {cited_doc_abstract}
 <end_cited_doc_abstract>
 
+Below is the tree of contents of the cited document:
+<begin_cited_doc_toc>
+{cited_doc_toc}
+<end_cited_doc_toc>
+
 The citation, you're meant to prepare the enriched footnote for, occurred in the following fragment from the survey paper (it was marked with "{citation_reference_text}"):
 
 <begin_citation_context_fragment>

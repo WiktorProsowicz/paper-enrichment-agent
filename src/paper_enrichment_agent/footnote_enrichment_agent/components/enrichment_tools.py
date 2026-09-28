@@ -63,31 +63,30 @@ class EnrichmentTools:
         The title should be set once after the content of the footnote is established and should
         reflect the role of the footnote in explaining the reference document.
 
+        ## Example
+        survey title: Attention Is All You Need
+        citation context: The two most commonly used attention functions are additive attention
+            [2], and dot-product (multiplicative) attention.
+        reference title: Neural machine translation by jointly learning to align and translate.
+        good footnote title: Description of additive attention mechanism
+
         Args:
             title: The title to be set.
-
-        Example:
-            survey title: Attention Is All You Need
-            citation context: The two most commonly used attention functions are additive attention
-                [2], and dot-product (multiplicative) attention.
-            reference title: Neural machine translation by jointly learning to align and translate.
-            good footnote title: Description of additive attention mechanism
         """
         self._footnote.title = title
 
     def get_paragraph_content(self, path_to_paragraph: str) -> str:
         """Returns the content of a paragraph in the reference document.
 
+        The textual content of the paragraph, composed from its elements, such as references,
+        links, text fragments etc. Note that the content is rendered the way a human would see
+        it on paper, i.e. with no markup or formatting metadata. Therefore, if the text refers
+        to an element, e.g. a figure, its placement should be inferred from the context, e.g.
+        "as shown in Figure 3.2" suggests the figure should be placed in the subsection 2 of
+        the section 3.
+
         Args:
             path_to_paragraph: The path to the paragraph in the reference document.
-
-        Returns:
-            The textual content of the paragraph, composed from its elements, such as references,
-            links, text fragments etc. Note that the content is rendered the way a human would see
-            it on paper, i.e. with no markup or formatting metadata. Therefore, if the text refers
-            to an element, e.g. a figure, its placement should be inferred from the context, e.g.
-            "as shown in Figure 3.2" suggests the figure should be placed in the subsection 2 of
-            the section 3.
         """
 
         paragraph = self._obtain_paragraph(path_to_paragraph)
@@ -98,18 +97,15 @@ class EnrichmentTools:
     def get_figure_details(self, path_to_figure: str) -> str:
         """Returns the details describing a given figure in the reference document.
 
+        ## Example output
+        Caption: A diagram illustrating the architecture of the Transformer model.
+        Subfigures:
+            ImgSubfigure: A schematic representation of the multi-head attention mechanism.
+            TableSubfigure: A table showing the hyperparameters used in the Transformer model.
+            ...
+
         Args:
             path_to_figure: The path to the figure in the reference document.
-
-        Returns:
-            The textual description of the figure's contents, including its caption and subfigures.
-
-        Example output:
-            Caption: A diagram illustrating the architecture of the Transformer model.
-            Subfigures:
-                ImgSubfigure: A schematic representation of the multi-head attention mechanism.
-                TableSubfigure: A table showing the hyperparameters used in the Transformer model.
-                ...
         """
 
         figure = self._doc_getter.get_component_by_path(path_to_figure)
@@ -141,21 +137,21 @@ class EnrichmentTools:
         the anchors should be chosen to match the text exactly, including punctuation
         and whitespace.
 
+        ## Example
+        paragraph content: "The two most commonly used attention functions are additive
+            attention [2], and dot-product (multiplicative) attention. Dot-product attention is
+            identical to our algorithm, except for the scaling factor of $1 / sqrt(d)$. Additive
+            attention computes the compatibility function using a feed-forward network with a
+            single hidden layer."
+        begin anchor: "Dot-product attention is"
+        end anchor: "scaling factor of $1 / sqrt(d)$."
+        returned citation: "Dot-product attention is identical to our algorithm, except for the
+            scaling factor of $1 / sqrt(d)$."
+
         Args:
             path_to_paragraph: The path to the paragraph in the reference document.
             begin_anchor: The beginning text anchor of the citation to be extracted.
             end_anchor: The ending text anchor of the citation to be extracted.
-
-        Example:
-            paragraph content: "The two most commonly used attention functions are additive
-                attention [2], and dot-product (multiplicative) attention. Dot-product attention is
-                identical to our algorithm, except for the scaling factor of $1 / sqrt(d)$. Additive
-                attention computes the compatibility function using a feed-forward network with a
-                single hidden layer."
-            begin anchor: "Dot-product attention is"
-            end anchor: "scaling factor of $1 / sqrt(d)$."
-            returned citation: "Dot-product attention is identical to our algorithm, except for the
-                scaling factor of $1 / sqrt(d)$."
         """
 
         paragraph = self._obtain_paragraph(path_to_paragraph)

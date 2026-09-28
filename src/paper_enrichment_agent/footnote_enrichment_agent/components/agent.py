@@ -3,6 +3,7 @@
 The module defines the agent invocation graph, handles tool calling and MLFlow-based agent tracing.
 """
 
+import dataclasses
 import datetime
 import operator
 import pathlib
@@ -24,29 +25,45 @@ from langchain_litellm import ChatLiteLLM
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, StateGraph
+from langgraph.runtime import Runtime as LangGraphRuntime
 from mcp.client.streamable_http import streamable_http_client as mcp_client
 from mlflow.entities import SpanType
 
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models.misc import FootnoteEnrichmentRequest
 from paper_enrichment_agent.footnote_enrichment_agent.components import doc_utils
+from paper_enrichment_agent.footnote_enrichment_agent.components.enrichment_tools import (
+    EnrichmentTools,
+)
 
 _PROMPT_TEMPLATES_PATH = pathlib.Path(__file__).parent / 'prompt_templates'
 
 
 class AgentState(TypedDict):
-    """Represents the current state of the footnote enrichment agent."""
+    """Represents the current state of the footnote enrichment agent.
+
+    Attributes:
+        init_messages: The initial messages of the agent's conversation, which include the task
+            description, guidelines and the base description of the reference and survey articles.
+    """
+
+    init_messages: Annotated[list[BaseMessage], operator.add]
+    revealed_paragraphs: list[tuple[str, str]]
+    cited_paragraphs_ids: list[str]
+    revealed_figures: list[tuple[str, str]]
+    extracted_figures_ids: list[str]
+
+
+@dataclasses.dataclass
+class AgentContext:
+    """Represents immutable context data for the footnote enrichment agent."""
 
     enrichment_session_id: str
-    messages: Annotated[list[BaseMessage], operator.add]
+    enrichmet_tools_state: EnrichmentTools
 
 
 class FootnoteEnrichmentAgent:
-    """The LLM agent for the `footnote_enrichment_agent` service.
-
-    In the agentic paradigm context, this is a ReAct agent, which consists of a simple
-    reason + tool execution loop.
-    """
+    """The LLM agent for the `footnote_enrichment_agent` service."""
 
     class Configuration(pydantic.BaseModel):
         """The configuration of the footnote enrichment agent."""
@@ -108,6 +125,7 @@ class FootnoteEnrichmentAgent:
                     input_variables=[
                         'cited_doc_title',
                         'cited_doc_abstract',
+                        'cited_doc_toc',
                         'citation_reference_text',
                         'citation_context_fragment',
                         'citation_context_info',
@@ -117,7 +135,9 @@ class FootnoteEnrichmentAgent:
         )
 
     @mlflow.trace(name='FootnoteEnrichmentAgent::invoke', span_type=SpanType.AGENT)
-    async def invoke(self, request: FootnoteEnrichmentRequest) -> str:
+    async def invoke(
+        self, request: FootnoteEnrichmentRequest, enrichment_tools_state: EnrichmentTools
+    ) -> str:
         """Invokes the LLM agent to compose a footnote from the given document.
 
         First, the LLM invocation graph is built / restored for the enrichment session. Then, the
@@ -126,6 +146,8 @@ class FootnoteEnrichmentAgent:
 
         Args:
             request: The footnote enrichment request data.
+            enrichment_tools_state: The enrichment tools state of the agent session, which holds
+                the reference document and the composed footnote.
 
         Returns:
             The textual content of the agent's final message.
@@ -133,7 +155,9 @@ class FootnoteEnrichmentAgent:
 
         mlflow.update_current_trace(session_id=request.session_id)
 
-        builder = StateGraph(AgentState, input_schema=FootnoteEnrichmentRequest)
+        builder = StateGraph(
+            AgentState, input_schema=FootnoteEnrichmentRequest, context_schema=AgentContext
+        )
 
         builder.add_node('enrich_new_footnote', self._enrich_new_footnote)  # type: ignore
         builder.add_node('perform_agent_reasoning_step', self._perform_agent_reasoning_step)
@@ -156,6 +180,10 @@ class FootnoteEnrichmentAgent:
         try:
             final_state = await graph.ainvoke(
                 request,
+                context=AgentContext(
+                    enrichment_session_id=request.session_id,
+                    enrichmet_tools_state=enrichment_tools_state,
+                ),
                 config={
                     'configurable': {'thread_id': request.session_id},
                     'recursion_limit': self._cfg.agent_recursion_limit,
@@ -167,7 +195,9 @@ class FootnoteEnrichmentAgent:
             return 'Enrichment ended due to recursion limit breach.'
 
     @mlflow.trace(name='enrich_new_footnote', span_type=SpanType.CHAIN)
-    async def _enrich_new_footnote(self, request: FootnoteEnrichmentRequest) -> AgentState:
+    async def _enrich_new_footnote(
+        self, request: FootnoteEnrichmentRequest, runtime: LangGraphRuntime[AgentContext]
+    ) -> AgentState:
         """The entrypoint of the footnote enrichment pipeline.
 
         This is the beginning of a single agent session turn, where the initial user query is built.
@@ -186,21 +216,25 @@ class FootnoteEnrichmentAgent:
             n_context_chars=self._cfg.citation_context_chars,
         )
 
+        cited_doc_toc = str(runtime.context.enrichmet_tools_state.get_document_tree())
+
         return {
-            'messages': self._enrichment_prompt_template.format_messages(
+            'init_messages': self._enrichment_prompt_template.format_messages(
                 survey_title=request.survey_title,
                 survey_abstract=request.survey_abstract,
                 cited_doc_title=request.reference_document.title,
                 cited_doc_abstract=request.reference_document.abstract,
+                cited_doc_toc=cited_doc_toc,
                 citation_reference_text=citation_reference.content_text,
                 citation_context_fragment=citation_context,
                 citation_context_info=request.citation_context_info,
-            ),
-            'enrichment_session_id': request.session_id,
+            )
         }
 
     @mlflow.trace(name='agent_reasoning', span_type=SpanType.CHAIN)
-    async def _perform_agent_reasoning_step(self, state: AgentState) -> AgentState:
+    async def _perform_agent_reasoning_step(
+        self, state: AgentState, runtime: LangGraphRuntime[AgentContext]
+    ) -> AgentState:
         """Performs a single step of the agent's reasoning and tool execution loop.
 
         First, the appropriate MCP endpoint is connected to get available tools. Then, the agent is
@@ -210,7 +244,7 @@ class FootnoteEnrichmentAgent:
         if curr_trace := mlflow.get_current_active_span():
             curr_trace.set_inputs(state)
 
-        async with self._setup_mcp_session(state['enrichment_session_id']) as mcp_session:
+        async with self._setup_mcp_session(runtime.context.enrichment_session_id) as mcp_session:
             mcp_tools = (await mcp_session.list_tools()).tools
 
         llm_with_tools = self._llm.bind_tools(
@@ -233,7 +267,9 @@ class FootnoteEnrichmentAgent:
         return {'messages': [model_response]}  # type: ignore[typeddict-item]
 
     @mlflow.trace(name='agent_action', span_type=SpanType.CHAIN)
-    async def _perform_agent_action_step(self, state: AgentState) -> AgentState:
+    async def _perform_agent_action_step(
+        self, state: AgentState, runtime: LangGraphRuntime[AgentContext]
+    ) -> AgentState:
         """Performs a single step of the agent's action execution loop.
 
         The agent's messages are parsed to extract the tool invocation action. Then, the appropriate
@@ -253,10 +289,10 @@ class FootnoteEnrichmentAgent:
 
         tool_responses: list[ToolMessage] = []
 
-        async with self._setup_mcp_session(state['enrichment_session_id']) as mcp_session:
+        async with self._setup_mcp_session(runtime.context.enrichment_session_id) as mcp_session:
             for tool_call in last_message.tool_calls:
                 with mlflow.start_span(
-                    f'call_tool for {tool_call["name"]}', span_type=SpanType.TOOL
+                    f'call_tool {tool_call["name"]}', span_type=SpanType.TOOL
                 ) as tool_call_span:
                     tool_call_span.set_inputs(tool_call['args'])
 
