@@ -36,6 +36,9 @@ class FigureUsefulnessResponseModel(pydantic.BaseModel):
     rationale: str
 
 
+_PROMPT_TEMPLATES_DIR = pathlib.Path(__file__).parent / 'llm_judge_prompts'
+
+
 def spawn_figure_usefulness_rating(llm: ChatLiteLLM) -> Scorer:
     """Dynamically creates the FigureUsefulnessRating LLM Judge."""
 
@@ -122,53 +125,131 @@ def spawn_figure_usefulness_rating(llm: ChatLiteLLM) -> Scorer:
 
 
 @scorer
-def agent_execution_stats_metrics(trace: Trace) -> list[Feedback]:
-    """Computes execution statistics for the agent based on the trace."""
+def paragraphs_extracted_before_revealing(trace: Trace) -> Feedback:
+    """Counts the number of paragraphs extracted into footnote before revealing their contents."""
+
+    extraction_spans = [
+        span
+        for span in trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
+        if span.attributes['tool_name'] == 'extract_paragraph_citation'
+    ]
+
+    reveal_spans = [
+        span
+        for span in trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
+        if span.attributes['tool_name'] == 'get_paragraph_content'
+    ]
+
+    return Feedback(
+        value=sum(
+            1
+            for extraction_span in extraction_spans
+            if any(
+                reveal_span.start_time_ns > extraction_span.start_time_ns
+                for reveal_span in reveal_spans
+                if (
+                    extraction_span.inputs['path_to_paragraph']
+                    == reveal_span.inputs['path_to_paragraph']
+                )
+            )
+        )
+    )
+
+
+@scorer
+def figures_extracted_before_revealing(trace: Trace) -> Feedback:
+    """Counts the number of figures extracted into footnote before revealing their contents."""
+
+    extraction_spans = [
+        span
+        for span in trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
+        if span.attributes['tool_name'] == 'extract_figure'
+    ]
+
+    reveal_spans = [
+        span
+        for span in trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
+        if span.attributes['tool_name'] == 'get_figure_details'
+    ]
+
+    return Feedback(
+        value=sum(
+            1
+            for extraction_span in extraction_spans
+            if any(
+                reveal_span.start_time_ns > extraction_span.start_time_ns
+                for reveal_span in reveal_spans
+                if (
+                    extraction_span.inputs['path_to_figure'] == reveal_span.inputs['path_to_figure']
+                )
+            )
+        )
+    )
+
+
+@harness_core.scorer_with_typed_args()
+def agent_execution_stats_metrics(outputs: doc_models.Section, trace: Trace) -> list[Feedback]:
+    """Computes general metrics about the agent's execution."""
 
     call_tool_spans = trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
     reason_spans = trace.search_spans(name=AGENT_REASONING_SPAN_NAME)
     action_spans = trace.search_spans(name=AGENT_ACTION_SPAN_NAME)
 
-    successful_tool_calls = len(
-        [span for span in call_tool_spans if not span.attributes['tool_is_error']]
+    enrichment_request = misc_models.FootnoteEnrichmentRequest(
+        **trace.search_spans(name=AGENT_INVOCATION_SPAN_NAME)[0].inputs['request']
     )
-    tool_call_success_rate = (
-        (successful_tool_calls / len(call_tool_spans)) if call_tool_spans else 0
+
+    reference_doc_getter = document_manipulators.DocumentGetter(
+        enrichment_request.reference_document
     )
 
     return [
         Feedback(name='call_tool_count', value=len(call_tool_spans)),
         Feedback(name='agent_reasoning_count', value=len(reason_spans)),
         Feedback(name='agent_action_count', value=len(action_spans)),
-        Feedback(name='tool_call_success_rate', value=tool_call_success_rate),
+        Feedback(
+            name='n_figures_in_reference_doc',
+            value=sum(1 for _ in reference_doc_getter.iter_components_of_type(doc_models.Figure)),
+        ),
+        Feedback(
+            name='n_paragraphs_in_reference_doc',
+            value=sum(
+                1 for _ in reference_doc_getter.iter_components_of_type(doc_models.Paragraph)
+            ),
+        ),
+        Feedback(
+            name='generated_footnote_rendered_size',
+            value=len(_stringify_generated_footnote(outputs)),
+        ),
     ]
 
 
-def spawn_specific_tool_usage_metric(
-    tool_name: str, metric_name: str, only_successful_calls: bool = False
-) -> Scorer:
+def spawn_specific_tool_usage_metrics(tool_name: str) -> Scorer:
     """Spawns a metric for tracking the usage of a specific tool."""
 
-    def specific_tool_usage_metric(trace: Trace) -> list[Feedback]:
+    def specific_tool_usage_metrics(trace: Trace) -> list[Feedback]:
         """Measures the call count for a specific tool."""
-        call_tool_spans = trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
-        specific_tool_calls = len(
-            [
-                span
-                for span in call_tool_spans
-                if span.attributes['tool_name'] == tool_name
-                and (not only_successful_calls or not span.attributes['tool_is_error'])
-            ]
-        )
+        call_tool_spans = [
+            span
+            for span in trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
+            if span.attributes['tool_name'] == tool_name
+        ]
 
-        return [Feedback(name=metric_name, value=specific_tool_calls)]
+        successful_tool_calls = [
+            span for span in call_tool_spans if not span.attributes['tool_is_error']
+        ]
 
-    specific_tool_usage_metric.__name__ = metric_name
+        return [
+            Feedback(name=f'call_count:{tool_name}', value=len(call_tool_spans)),
+            Feedback(
+                name=f'success_rate:{tool_name}',
+                value=(
+                    len(successful_tool_calls) / len(call_tool_spans) if call_tool_spans else 0.0
+                ),
+            ),
+        ]
 
-    return scorer(specific_tool_usage_metric)
-
-
-_PROMPT_TEMPLATES_DIR = pathlib.Path(__file__).parent / 'llm_judge_prompts'
+    return scorer(specific_tool_usage_metrics)
 
 
 def _render_all_figures_from_document(document: doc_models.Document) -> str:

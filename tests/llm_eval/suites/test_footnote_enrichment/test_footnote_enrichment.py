@@ -73,16 +73,12 @@ def test_footnote_enrichment_first_request(suite_run: harness_core.EvaluationRun
         [
             harness_scorers.spawn_figure_usefulness_rating(judge_llm),
             harness_scorers.agent_execution_stats_metrics,
-            harness_scorers.spawn_specific_tool_usage_metric(
-                'get_paragraph_content',
-                metric_name='revealed_paragraphs',
-                only_successful_calls=True,
-            ),
-            harness_scorers.spawn_specific_tool_usage_metric(
-                'get_figure_details',
-                metric_name='revealed_figures',
-                only_successful_calls=True,
-            ),
+            harness_scorers.spawn_specific_tool_usage_metrics('get_paragraph_content'),
+            harness_scorers.spawn_specific_tool_usage_metrics('get_figure_details'),
+            harness_scorers.spawn_specific_tool_usage_metrics('extract_paragraph_citation'),
+            harness_scorers.spawn_specific_tool_usage_metrics('extract_figure'),
+            harness_scorers.paragraphs_extracted_before_revealing,
+            harness_scorers.figures_extracted_before_revealing,
         ],
         predict,
     )
