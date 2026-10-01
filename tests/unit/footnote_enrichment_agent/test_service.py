@@ -6,6 +6,9 @@ from paper_enrichment_agent.common.models.misc import FootnoteEnrichmentRequest
 from paper_enrichment_agent.footnote_enrichment_agent.components.enrichment_context_manager import (
     EnrichmentContextManager,
 )
+from paper_enrichment_agent.footnote_enrichment_agent.components.enrichment_tools import (
+    EnrichmentTools,
+)
 from paper_enrichment_agent.footnote_enrichment_agent.service import FootnoteEnrichmentAgentService
 
 
@@ -65,7 +68,9 @@ def mock_enrichment_context_manager(sample_footnote):
     """Mocks the manager running the enrichment context of a session."""
 
     manager = MagicMock(spec=EnrichmentContextManager)
-    manager.setup_mcp_for_agent_session.return_value.__aenter__.return_value = None
+    manager.setup_mcp_for_agent_session.return_value.__aenter__.return_value = MagicMock(
+        spec=EnrichmentTools
+    )
     manager.get_footnote_state.return_value = sample_footnote
 
     return manager
@@ -126,7 +131,10 @@ class TestReferenceToFootnote:
         mock_enrichment_context_manager.setup_mcp_for_agent_session.assert_called_once_with(
             sample_enrichment_request.session_id, sample_enrichment_request.reference_document
         )
-        agent.invoke.assert_called_once_with(sample_enrichment_request)
+        agent.invoke.assert_called_once_with(
+            sample_enrichment_request,
+            mock_enrichment_context_manager.setup_mcp_for_agent_session.return_value.__aenter__.return_value,
+        )
         mock_enrichment_context_manager.get_footnote_state.assert_called_once_with(
             sample_enrichment_request.session_id
         )

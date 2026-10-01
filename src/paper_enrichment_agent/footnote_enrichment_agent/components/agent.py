@@ -43,15 +43,11 @@ class AgentState(TypedDict):
     """Represents the current state of the footnote enrichment agent.
 
     Attributes:
-        init_messages: The initial messages of the agent's conversation, which include the task
-            description, guidelines and the base description of the reference and survey articles.
+        messages: The conversation history of the agent, which consists of the initial task
+            description and the messages appended at each reasoning / action step.
     """
 
-    init_messages: Annotated[list[BaseMessage], operator.add]
-    revealed_paragraphs: list[tuple[str, str]]
-    cited_paragraphs_ids: list[str]
-    revealed_figures: list[tuple[str, str]]
-    extracted_figures_ids: list[str]
+    messages: Annotated[list[BaseMessage], operator.add]
 
 
 @dataclasses.dataclass
@@ -59,11 +55,15 @@ class AgentContext:
     """Represents immutable context data for the footnote enrichment agent."""
 
     enrichment_session_id: str
-    enrichmet_tools_state: EnrichmentTools
+    enrichment_tools_state: EnrichmentTools
 
 
 class FootnoteEnrichmentAgent:
-    """The LLM agent for the `footnote_enrichment_agent` service."""
+    """The LLM agent for the `footnote_enrichment_agent` service.
+
+    In the agentic paradigm context, this is a ReAct agent, which consists of a simple
+    reason + tool execution loop.
+    """
 
     class Configuration(pydantic.BaseModel):
         """The configuration of the footnote enrichment agent."""
@@ -182,7 +182,7 @@ class FootnoteEnrichmentAgent:
                 request,
                 context=AgentContext(
                     enrichment_session_id=request.session_id,
-                    enrichmet_tools_state=enrichment_tools_state,
+                    enrichment_tools_state=enrichment_tools_state,
                 ),
                 config={
                     'configurable': {'thread_id': request.session_id},
@@ -216,10 +216,10 @@ class FootnoteEnrichmentAgent:
             n_context_chars=self._cfg.citation_context_chars,
         )
 
-        cited_doc_toc = str(runtime.context.enrichmet_tools_state.get_document_tree())
+        cited_doc_toc = str(runtime.context.enrichment_tools_state.get_document_tree())
 
         return {
-            'init_messages': self._enrichment_prompt_template.format_messages(
+            'messages': self._enrichment_prompt_template.format_messages(
                 survey_title=request.survey_title,
                 survey_abstract=request.survey_abstract,
                 cited_doc_title=request.reference_document.title,
@@ -264,7 +264,7 @@ class FootnoteEnrichmentAgent:
 
         model_response = await llm_with_tools.ainvoke(state['messages'])
 
-        return {'messages': [model_response]}  # type: ignore[typeddict-item]
+        return {'messages': [model_response]}
 
     @mlflow.trace(name='agent_action', span_type=SpanType.CHAIN)
     async def _perform_agent_action_step(
