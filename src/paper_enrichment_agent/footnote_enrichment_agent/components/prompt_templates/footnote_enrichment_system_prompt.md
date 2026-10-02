@@ -30,7 +30,7 @@ The cited document represents a tree-like structure of components. Each componen
 
 Example: A path to a figure with id `figure_1` located in the subsection with id `subsection_2`, which is located in the section with id `section_3` may look like `/sections/section_3/subsection_2/figure_1`.
 
-Note: the ids of the components can be retrieved by displaying the entire tree representation of the document.
+Note: the ids and paths of the components can be found in the tree of contents of the cited document, which is provided in the user message.
 Note: the ids do not contain whitespaces and therefore a path should not contains them as well.
 Note: besides the initial prefix, the path contains only component ids. DO NOT provide elements such as here: `/sections/section_3/components/subsection_2`
 
@@ -44,15 +44,11 @@ Example 1: the survey's topic are neural Text-to-Speech models and it's fragment
 
 Example 2. the survey's topic is the use of advanced generative algorithms in TTS models and it's fragment says "To date, many TTS systems effectively applied classical regression to generate human speech [1, 2, 3]". Then, the footnote composed for each citation should just briefly describe the methodology described in the cited document, possibly including a figure with overall architecture, because the survey does not explicitly mention the details of the reference papers.
 
-2. You should avoid creating overly detailed footnotes. They aim to provide an extension to the original description of the referenced paper, instead of shipping unnecessary contents of the document.
+2. Before you start composing the footnote, the first step should be gaining enough context and information about the cited paper. To this end, use the provided tree of contents to grasp the overall structure of the document and then use the supplied tools to start reading the paragraphs and figures that are most likely to contain information you are looking for. A good source of initial information is the abstract or one of the last paragraphs in the "Introduction" chapter. This will allow you to avoid spending time and resources on discovering irrelevant parts of the document.
 
-Example: the survey tells that a particular cited paper proposes a new evaluation methodology, which is important to the desribed topic. Therefore, the created footnote should contain just a brief description of the reference, e.g. a fragment or the entire absract, and fragments from the chapter describing the evaluation methodology instead of the details of the proposed system.
+3. The supplied tools can be used both to get the information about the referenced document, as well as to modify the state of the currently enriched footnote. This means that e.g. each paragraph added to the footnote stays there unless you explicitly remove it.
 
-3. Before you start composing the footnote, the first step should be gaining enough context and information about the cited paper. To this end, use the supplied tools to grasp the overall structure of the document and then start reading the paragraphs and figures that are most likely to contain information you are looking for. A good source of initial information is the abstract or one of the last paragraphs in the "Introduction" chapter. This will allow you to avoid spending time and resources on discovering irrelevant parts of the document.
-
-4. The supplied tools can be used both to get the information about the referenced document, as well as to modify the state of the currently enriched footnote. This means that e.g. each paragraph added to the footnote stays there unless you explicitly remove it.
-
-5. Do not invent ids or elements of document components in the tool calls. E.g. do not request for the contents of a figure that is not present in the document. Do not try to extract citation from a paragraph you do not know the contents of.
+4. Do not invent ids or elements of document components in the tool calls. E.g. do not request for the contents of a figure that is not present in the document. Do not try to extract citation from a paragraph you do not know the contents of.
 
 ### Survey article
 

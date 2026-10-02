@@ -6,6 +6,7 @@ Below there's its abstract:
 <end_cited_doc_abstract>
 
 Below is the tree of contents of the cited document:
+
 <begin_cited_doc_toc>
 {cited_doc_toc}
 <end_cited_doc_toc>
@@ -18,4 +19,4 @@ The citation, you're meant to prepare the enriched footnote for, occurred in the
 
 Additional information about the survey's fragment that cites the referenced paper: {citation_context_info}
 
-Using the shipped enrichment-state-manipulation tools, build a footnote that properly explains the core contents of the referenced paper. After you're done using the tools, just summarize in few words, what has been done. This is the moment, where the footnote will be expected to be ready to be extracted from the enrichment state.
+Using the shipped enrichment-state-manipulation tools, build a footnote that properly explains the core contents of the referenced paper. After you're done using the tools, generate a concise summary that will be used as the prelude of the footnote. It should be a fragment of the abstract that describes the part of the cited paper that has been extracted into the footnote. This is the moment, where the footnote will be expected to be ready to be extracted from the enrichment state.
