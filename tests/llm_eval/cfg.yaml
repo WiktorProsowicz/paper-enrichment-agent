@@ -12,16 +12,11 @@ suite_configs:
 
     thresholds:
       footnote_enrichment:
-        figure_usefulness_rating: 4.0
-        tool_call_success_rate: 0.8
-        call_tool_count: 0.0
-        agent_reasoning_count: 0.0
-        agent_action_count: 0.0
-        revealed_paragraphs: 0.0
-        revealed_figures: 0.0
+        figure_usefulness_rating/mean: 4.0
+        success_rate:extract_paragraph_citation/mean: 0.8
 
     judge_llm_config:
-      model_name: deepinfra/meta-llama/Llama-3.3-70B-Instruct-Turbo
+      model_name: deepinfra/moonshotai/Kimi-K2.6
       api_key: JUDGE_LLM_API_KEY
       model_params:
         temperature: 0.3

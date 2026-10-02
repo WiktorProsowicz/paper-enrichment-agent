@@ -144,8 +144,8 @@ def paragraphs_extracted_before_revealing(trace: Trace) -> Feedback:
         value=sum(
             1
             for extraction_span in extraction_spans
-            if any(
-                reveal_span.start_time_ns > extraction_span.start_time_ns
+            if not any(
+                reveal_span.start_time_ns < extraction_span.start_time_ns
                 for reveal_span in reveal_spans
                 if (
                     extraction_span.inputs['path_to_paragraph']
@@ -176,8 +176,8 @@ def figures_extracted_before_revealing(trace: Trace) -> Feedback:
         value=sum(
             1
             for extraction_span in extraction_spans
-            if any(
-                reveal_span.start_time_ns > extraction_span.start_time_ns
+            if not any(
+                reveal_span.start_time_ns < extraction_span.start_time_ns
                 for reveal_span in reveal_spans
                 if (
                     extraction_span.inputs['path_to_figure'] == reveal_span.inputs['path_to_figure']
