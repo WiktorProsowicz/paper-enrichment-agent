@@ -28,6 +28,10 @@ class EnrichmentTools:
 
     type DocumentTree = str | list[DocumentTree] | dict[str, DocumentTree]
 
+    # The minimal fraction of a citation anchor that has to be matched in the paragraph content for
+    # the anchor to be located.
+    _MIN_ANCHOR_MATCH_RATIO = 0.95
+
     def __init__(self, reference_document: doc_models.Document) -> None:
 
         self._document = reference_document
@@ -97,11 +101,16 @@ class EnrichmentTools:
     def get_figure_details(self, path_to_figure: str) -> str:
         """Returns the details describing a given figure in the reference document.
 
+        Each subfigure is listed together with its id, which can be used to extract only the chosen
+        subfigures of the figure.
+
         ## Example output
         Caption: A diagram illustrating the architecture of the Transformer model.
         Subfigures:
-            ImgSubfigure: A schematic representation of the multi-head attention mechanism.
-            TableSubfigure: A table showing the hyperparameters used in the Transformer model.
+            ImgSubfigure (id: subfigure_1): A schematic representation of the multi-head attention
+                mechanism.
+            TableSubfigure (id: subfigure_2): A table showing the hyperparameters used in the
+                Transformer model.
             ...
 
         Args:
@@ -117,7 +126,8 @@ class EnrichmentTools:
             f'Caption: {figure.caption}\n'
             + 'Subfigures:\n'
             + '\n'.join(
-                f'\t{subfigure.__class__.__name__}: {subfigure.caption}'
+                f'\t{subfigure.__class__.__name__} (id: {subfigure.component_id}): '
+                f'{subfigure.caption}'
                 for subfigure in figure.subfigures
             )
         )
@@ -158,24 +168,13 @@ class EnrichmentTools:
         str_elements = doc_utils.stringify_paragraph_elements(paragraph)
         paragraph_content = ''.join(e.str_content for e in str_elements)
 
-        match_begin = difflib.SequenceMatcher(
-            None, paragraph_content, begin_anchor
-        ).find_longest_match(0, len(paragraph_content), 0, len(begin_anchor))
-
-        if match_begin.size != len(begin_anchor):
-            raise ValueError('Begin anchor not found in paragraph content.')
-
-        match_end = difflib.SequenceMatcher(None, paragraph_content, end_anchor).find_longest_match(
-            0, len(paragraph_content), 0, len(end_anchor)
-        )
-
-        if match_end.size != len(end_anchor):
-            raise ValueError('End anchor not found in paragraph content.')
+        citation_begin, _ = self._locate_anchor(paragraph_content, begin_anchor)
+        _, citation_end = self._locate_anchor(paragraph_content, end_anchor)
 
         citation_elements: list[doc_models.Paragraph.InlineParagraphElement] = []
 
         for start_idx, end_idx, element in doc_utils.iter_str_elements_boundaries(str_elements):
-            if match_begin.a >= end_idx or match_end.a + match_end.size <= start_idx:
+            if citation_begin >= end_idx or citation_end <= start_idx:
                 continue
 
             if element.doc_component is not None:
@@ -183,9 +182,7 @@ class EnrichmentTools:
                 continue
 
             citation_elements.append(
-                element.str_content[
-                    max(0, match_begin.a - start_idx) : match_end.a + match_end.size - start_idx
-                ]
+                element.str_content[max(0, citation_begin - start_idx) : citation_end - start_idx]
             )
 
         citation_paragraph = doc_models.Paragraph(elements=[])
@@ -200,7 +197,7 @@ class EnrichmentTools:
 
         self._footnote.components.append(citation_paragraph)
 
-    def extract_figure(self, path_to_figure: str, subfigures_ids: list[str] | None) -> None:
+    def extract_figure(self, path_to_figure: str, subfigures_ids: list[str] | None = None) -> None:
         """Extracts a figure from the reference document and adds it to the footnote.
 
         The extracted figure is added to the enriched footnote. Figures provide visual explanation
@@ -255,6 +252,30 @@ class EnrichmentTools:
             raise ValueError(f'Component at path {path_to_paragraph} is not a paragraph.')
 
         return paragraph
+
+    def _locate_anchor(self, paragraph_content: str, anchor: str) -> tuple[int, int]:
+        """Locates a text anchor in the paragraph content.
+
+        The anchor is located by the longest sequence it shares with the paragraph content. The
+        sequence is accepted even if it does not cover the entire anchor, as long as its length is
+        at least `_MIN_ANCHOR_MATCH_RATIO` of the anchor's length, so that minor mistakes in the
+        anchor do not prevent locating it.
+
+        Returns:
+            The (start, end) indices of the matched sequence in the paragraph content.
+
+        Raises:
+            ValueError: If the anchor is not found in the paragraph content.
+        """
+
+        match = difflib.SequenceMatcher(None, paragraph_content, anchor).find_longest_match(
+            0, len(paragraph_content), 0, len(anchor)
+        )
+
+        if match.size == 0 or match.size < self._MIN_ANCHOR_MATCH_RATIO * len(anchor):
+            raise ValueError(f'Anchor "{anchor}" not found in paragraph content.')
+
+        return match.a, match.a + match.size
 
     def _convert_component_to_tree(
         self, root_path: str, component: doc_models.DocumentComponent

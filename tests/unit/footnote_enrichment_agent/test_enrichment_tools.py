@@ -177,8 +177,8 @@ class TestEnrichmentContext:
         expected_details = (
             'Caption: Sample figure caption.\n'
             'Subfigures:\n'
-            '\tImgSubfigure: Sample subfigure caption.\n'
-            '\tTableSubfigure: Sample subfigure caption.'
+            '\tImgSubfigure (id: subfigure_1): Sample subfigure caption.\n'
+            '\tTableSubfigure (id: subfigure_2): Sample subfigure caption.'
         )
 
         assert sample_enrichment_tools.get_figure_details(path_to_figure) == expected_details
@@ -228,6 +228,52 @@ class TestEnrichmentContext:
         assert isinstance(extracted_paragraph.elements[0], doc_models.Reference)
         assert extracted_paragraph.elements[0].content_text == 'http://example.com'
         assert extracted_paragraph.elements[1] == ' and this is a reference'
+
+    def test_extract_paragraph_citation_tolerates_minor_anchor_mismatches(
+        self, sample_enrichment_tools
+    ):
+
+        sample_enrichment_tools.extract_paragraph_citation(
+            path_to_paragraph='/sections/section_1/paragraph_1',
+            begin_anchor='These are referenced papers:',
+            end_anchor='a reference to element: Figure 3.1 and this is all!',
+        )
+
+        assert len(sample_enrichment_tools.footnote.components) == 1
+
+        extracted_paragraph = sample_enrichment_tools.footnote.components[0]
+
+        assert isinstance(extracted_paragraph, doc_models.Paragraph)
+
+        assert (
+            extracted_paragraph.elements[0]
+            == 'hese are referenced papers: [1, 2, 3] and this is a link: '
+        )
+        assert isinstance(extracted_paragraph.elements[1], doc_models.Reference)
+        assert (
+            extracted_paragraph.elements[2]
+            == ' and this is a reference to element: Figure 3.1 and this is all'
+        )
+
+    @pytest.mark.parametrize(
+        ('begin_anchor', 'end_anchor'),
+        [
+            ('a formula;', 'this is all.'),
+            ('a formula:', 'and this is all, Thank you.'),
+        ],
+    )
+    def test_extract_paragraph_citation_raises_on_major_anchor_mismatches(
+        self, sample_enrichment_tools, begin_anchor, end_anchor
+    ):
+
+        with pytest.raises(ValueError, match='not found in paragraph content'):
+            sample_enrichment_tools.extract_paragraph_citation(
+                path_to_paragraph='/sections/section_1/paragraph_1',
+                begin_anchor=begin_anchor,
+                end_anchor=end_anchor,
+            )
+
+        assert sample_enrichment_tools.footnote.components == []
 
     def test_extract_figure_raises_on_invalid_path(self, sample_enrichment_tools):
         with pytest.raises(ValueError, match='Component not found in the document'):
