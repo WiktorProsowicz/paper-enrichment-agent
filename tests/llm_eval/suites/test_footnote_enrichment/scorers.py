@@ -43,6 +43,13 @@ class TextRelevanceResponseModel(pydantic.BaseModel):
     rationale: str
 
 
+class TitleRelevanceResponseModel(pydantic.BaseModel):
+    """Response model for the TitleRelevanceRating LLM Judge."""
+
+    rating: int = pydantic.Field(ge=1, le=3)
+    rationale: str
+
+
 _PROMPT_TEMPLATES_DIR = pathlib.Path(__file__).parent / 'llm_judge_prompts'
 
 
@@ -184,6 +191,72 @@ def spawn_text_relevance_rating(llm: ChatLiteLLM) -> Scorer:
         )
 
     return text_relevance_rating
+
+
+def spawn_title_relevance_rating(llm: ChatLiteLLM) -> Scorer:
+    """Dynamically creates the TitleRelevanceRating LLM Judge."""
+
+    with open(_PROMPT_TEMPLATES_DIR.joinpath('title_relevance_rating_system_prompt.md')) as f:
+        system_prompt = f.read()
+
+    message_template = ChatPromptTemplate.from_messages(
+        [
+            SystemMessage(content=system_prompt),
+            HumanMessagePromptTemplate.from_template_file(
+                _PROMPT_TEMPLATES_DIR.joinpath('title_relevance_rating_user_prompt.md'),
+                input_variables=[
+                    'base_article_title',
+                    'base_article_abstract',
+                    'citing_paragraph_fragment',
+                    'citing_paragraph_additional_context',
+                    'cited_article_title',
+                    'cited_article_abstract',
+                    'footnote_title',
+                    'footnote_content',
+                ],
+            ),
+        ]
+    )
+
+    output_parser = PydanticOutputParser(pydantic_object=TitleRelevanceResponseModel)
+
+    @harness_core.scorer_with_typed_args()
+    @mlflow.trace(name='title_relevance_rating', span_type=SpanType.EVALUATOR)
+    def title_relevance_rating(trace: Trace, outputs: doc_models.Section) -> Feedback:
+        """Assigns the TitleRelevanceRating to the enriched footnote.
+
+        TitleRelevanceRating is a discrete integer score on scale (1-3) that indicates how well the
+        title of the enriched footnote names its content and corresponds to the context of the
+        citation.
+        """
+
+        if not outputs.title.strip():
+            return Feedback(value=1, rationale='The agent did not set a title for the footnote.')
+
+        enrichment_request, citing_paragraph_fragment = _get_request_and_citation_fragment(trace)
+
+        enriched_footnote_repr = _stringify_generated_footnote(outputs)
+
+        model_response = llm.invoke(
+            message_template.format_messages(
+                base_article_title=enrichment_request.survey_title,
+                base_article_abstract=enrichment_request.survey_abstract,
+                citing_paragraph_fragment=citing_paragraph_fragment,
+                citing_paragraph_additional_context=enrichment_request.citation_context_info,
+                cited_article_title=enrichment_request.reference_document.title,
+                cited_article_abstract=enrichment_request.reference_document.abstract,
+                footnote_title=outputs.title,
+                footnote_content=enriched_footnote_repr,
+            )
+        )
+        parsed_response = output_parser.parse(str(model_response.content))
+
+        return Feedback(
+            value=parsed_response.rating,
+            rationale=parsed_response.rationale,
+        )
+
+    return title_relevance_rating
 
 
 @scorer

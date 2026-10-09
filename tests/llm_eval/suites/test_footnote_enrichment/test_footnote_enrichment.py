@@ -21,6 +21,7 @@ def test_footnote_enrichment_first_request(suite_run: harness_core.EvaluationRun
     the context of citation:
     1. Usefulness of figures extracted from the cited document (scale 1-5).
     2. Relevance and completeness of text extracted from the cited document (scale 1-10).
+    3. Relevance of the footnote's title to its content and the context of citation (scale 1-3).
 
     Additionally, the agent's execution is measured with deterministic metrics:
     1. General execution stats: the number of tool calls, reasoning and action steps, the number
@@ -83,6 +84,7 @@ def test_footnote_enrichment_first_request(suite_run: harness_core.EvaluationRun
         [
             harness_scorers.spawn_figure_usefulness_rating(judge_llm),
             harness_scorers.spawn_text_relevance_rating(judge_llm),
+            harness_scorers.spawn_title_relevance_rating(judge_llm),
             harness_scorers.agent_execution_stats_metrics,
             harness_scorers.spawn_specific_tool_usage_metrics('get_paragraph_content'),
             harness_scorers.spawn_specific_tool_usage_metrics('get_figure_details'),
