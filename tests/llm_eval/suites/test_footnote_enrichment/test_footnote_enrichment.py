@@ -63,9 +63,9 @@ def test_footnote_enrichment_first_request(suite_run: harness_core.EvaluationRun
     )
 
     judge_llm = ChatLiteLLM(
-        model=run_config['judge_llm_config']['model_name'],
-        api_key=run_config['judge_llm_config']['api_key'],
-        **run_config['judge_llm_config'].get('model_params', {}),
+        model=suite_run.judge_llm_config.model_name,
+        api_key=suite_run.judge_llm_config.api_key,
+        **suite_run.judge_llm_config.model_params,
     )
 
     eval_results = mlflow.genai.evaluate(

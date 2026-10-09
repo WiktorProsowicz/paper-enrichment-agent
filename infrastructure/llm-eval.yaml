@@ -19,7 +19,7 @@ services:
     image: app-base:eval
     restart: no
     container_name: llm-eval-eval-runner
-    command: [uv, run, python, tests/llm_eval/run_eval.py, 'suite_configs.test_footnote_enrichment.judge_llm_config.api_key=${JUDGE_LLM_API_KEY}']
+    command: [uv, run, python, tests/llm_eval/run_eval.py, 'judge_llm_config.model_name=${JUDGE_LLM_MODEL}', 'judge_llm_config.api_key=${JUDGE_LLM_API_KEY}']
     depends_on:
       footnote-enrichment-agent:
         condition: service_healthy

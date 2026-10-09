@@ -17,6 +17,23 @@ import pydantic
 from pydantic import Field
 
 
+class JudgeLLMConfig(pydantic.BaseModel):
+    """Configuration of the LLM used by the LLM Judges."""
+
+    model_name: Annotated[
+        str,
+        Field(description='The LiteLLM-supported model signature of the judge LLM.', min_length=1),
+    ]
+    api_key: Annotated[str, Field(description='The API key for the judge LLM.', min_length=1)]
+    model_params: Annotated[
+        dict[str, Any],
+        Field(
+            default_factory=dict,
+            description='The model-specific parameters passed to the LiteLLM constructor.',
+        ),
+    ]
+
+
 class EvaluationConfig(pydantic.BaseModel):
     """Pydantic model for the evaluation configuration.
 
@@ -32,6 +49,9 @@ class EvaluationConfig(pydantic.BaseModel):
             description='The list of active test suites. If None, all suites are considered active.'
         ),
     ]
+    judge_llm_config: Annotated[
+        JudgeLLMConfig, Field(description='Configuration of the LLM used by the LLM Judges.')
+    ]
     suite_configs: Annotated[
         dict[str, dict[str, Any]], Field(description='The per-suite configurations')
     ]
@@ -46,6 +66,7 @@ class EvaluationRun:
 
     mlflow_run: mlflow_entities.Run
     suite_config: dict[str, Any]
+    judge_llm_config: JudgeLLMConfig
 
 
 def validate_results(

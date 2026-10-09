@@ -2,6 +2,12 @@
 mlflow_tracking_uri: http://mlflow:5000
 active_suites: [test_footnote_enrichment]
 
+judge_llm_config:
+  model_name: ''
+  api_key: ''
+  model_params:
+    temperature: 0.3
+
 suite_configs:
   test_footnote_enrichment:
     footnote_enrichment_service_url: http://footnote-enrichment-agent:8081
@@ -14,9 +20,3 @@ suite_configs:
       footnote_enrichment:
         figure_usefulness_rating/mean: 4.0
         success_rate:extract_paragraph_citation/mean: 0.8
-
-    judge_llm_config:
-      model_name: deepinfra/moonshotai/Kimi-K2.6
-      api_key: JUDGE_LLM_API_KEY
-      model_params:
-        temperature: 0.3

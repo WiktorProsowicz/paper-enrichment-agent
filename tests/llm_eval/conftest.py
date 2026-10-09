@@ -112,7 +112,9 @@ def suite_run(
             mlflow_plugin_session._run_owned = False
 
             yield harness_core.EvaluationRun(
-                mlflow_run=run, suite_config=_evaluation_config.suite_configs[suite_name]
+                mlflow_run=run,
+                suite_config=_evaluation_config.suite_configs[suite_name],
+                judge_llm_config=_evaluation_config.judge_llm_config,
             )
 
             call_report: pytest.TestReport | None = getattr(request.node, 'report_call', None)
