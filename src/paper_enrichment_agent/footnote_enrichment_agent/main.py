@@ -60,7 +60,8 @@ class AppCfg(pydantic.BaseModel):
             description=(
                 'The LiteLLM-supported model signature of the LLM used by the footnote'
                 'enrichment agent.'
-            )
+            ),
+            min_length=1,
         ),
     ]
     agent_llm_params: Annotated[
@@ -74,7 +75,10 @@ class AppCfg(pydantic.BaseModel):
     ]
     llm_api_key: Annotated[
         pydantic.SecretStr,
-        Field(description='The API key for the LLM used by the footnote enrichment agent'),
+        Field(
+            description='The API key for the LLM used by the footnote enrichment agent',
+            min_length=1,
+        ),
     ]
 
 

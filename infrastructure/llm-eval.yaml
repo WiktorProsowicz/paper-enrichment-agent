@@ -6,7 +6,7 @@ services:
     image: app-base:runtime
     container_name: llm-eval-footnote-enrichment-agent
     restart: unless-stopped
-    command: [uv, run, python, -m, paper_enrichment_agent.footnote_enrichment_agent.main, 'llm_api_key=${LLM_API_KEY}']
+    command: [uv, run, python, -m, paper_enrichment_agent.footnote_enrichment_agent.main, 'agent_llm_model=${LLM_MODEL}', 'llm_api_key=${LLM_API_KEY}']
     healthcheck:
       test: [CMD-SHELL, curl -f http://localhost:8081/health || exit 1]
       interval: 5s
