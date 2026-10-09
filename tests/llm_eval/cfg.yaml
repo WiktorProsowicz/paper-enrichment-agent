@@ -1,5 +1,6 @@
 ---
 mlflow_tracking_uri: http://mlflow:5000
+test_case_exec_timeout: 1800
 active_suites: [test_footnote_enrichment]
 
 judge_llm_config:
@@ -11,7 +12,6 @@ judge_llm_config:
 suite_configs:
   test_footnote_enrichment:
     footnote_enrichment_service_url: http://footnote-enrichment-agent:8081
-    enrichment_service_request_timeout: 1800
 
     datasets:
       footnote_enrichment: footnote_enrichment_ds/v1

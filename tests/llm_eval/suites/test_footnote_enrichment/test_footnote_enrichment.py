@@ -46,9 +46,10 @@ def test_footnote_enrichment_first_request(suite_run: harness_core.EvaluationRun
             citation_context_info=inputs.citation_context,
         )
 
+        # The execution time is bounded by the per-test-case timeout (`test_case_exec_timeout`).
         http_client = HTTPClient(
             base_url=run_config['footnote_enrichment_service_url'],
-            timeout=run_config['enrichment_service_request_timeout'],
+            timeout=999999,
         )
 
         return await http_client.apost(

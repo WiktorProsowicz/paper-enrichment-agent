@@ -43,6 +43,10 @@ class EvaluationConfig(pydantic.BaseModel):
     mlflow_tracking_uri: Annotated[
         str, Field(description='The URI for the MLflow tracking server.')
     ]
+    test_case_exec_timeout: Annotated[
+        int,
+        Field(description='The timeout (in seconds) for executing a single evaluated test case.'),
+    ]
     active_suites: Annotated[
         list[str] | None,
         Field(

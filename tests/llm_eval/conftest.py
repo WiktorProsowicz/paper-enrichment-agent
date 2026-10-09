@@ -83,7 +83,7 @@ def _mlflow_connected(_evaluation_config: harness_core.EvaluationConfig) -> None
     os.environ['MLFLOW_GENAI_EVAL_MAX_SCORER_WORKERS'] = '2'
     os.environ['MLFLOW_GENAI_EVAL_MAX_RETRIES'] = '3'
     os.environ['MLFLOW_GENAI_EVAL_LLM_TIMEOUT'] = '120'
-    os.environ['MLFLOW_GENAI_EVAL_ASYNC_TIMEOUT'] = '600'
+    os.environ['MLFLOW_GENAI_EVAL_ASYNC_TIMEOUT'] = str(_evaluation_config.test_case_exec_timeout)
     os.environ['MLFLOW_GENAI_EVAL_SKIP_TRACE_VALIDATION'] = 'true'
 
     mlflow_setup.setup_mlflow(
