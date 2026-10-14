@@ -275,6 +275,27 @@ class TestEnrichmentContext:
 
         assert sample_enrichment_tools.footnote.components == []
 
+    def test_extract_whole_paragraph_raises_on_non_paragraph_path(self, sample_enrichment_tools):
+        with pytest.raises(ValueError, match='is not a paragraph'):
+            sample_enrichment_tools.extract_whole_paragraph('/sections/section_1/list_1')
+
+        assert sample_enrichment_tools.footnote.components == []
+
+    def test_extract_whole_paragraph_extracts_all_elements(self, sample_enrichment_tools):
+
+        sample_enrichment_tools.extract_whole_paragraph('/sections/section_1/paragraph_1')
+
+        assert len(sample_enrichment_tools.footnote.components) == 1
+
+        extracted_paragraph = sample_enrichment_tools.footnote.components[0]
+
+        assert isinstance(extracted_paragraph, doc_models.Paragraph)
+        assert len(extracted_paragraph.elements) == 11
+        assert extracted_paragraph.elements[0] == 'This is a formula: '
+        assert isinstance(extracted_paragraph.elements[1], doc_models.MathExpression)
+        assert isinstance(extracted_paragraph.elements[3], doc_models.Reference)
+        assert extracted_paragraph.elements[-1] == ' and this is all. Thank you.'
+
     def test_extract_figure_raises_on_invalid_path(self, sample_enrichment_tools):
         with pytest.raises(ValueError, match='Component not found in the document'):
             sample_enrichment_tools.extract_figure('/invalid/path', subfigures_ids=None)

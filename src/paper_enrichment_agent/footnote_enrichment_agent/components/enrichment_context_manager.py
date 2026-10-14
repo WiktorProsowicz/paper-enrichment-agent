@@ -103,6 +103,7 @@ class EnrichmentContextManager:
         mcp_server.tool(tools_state.get_paragraph_content, name='get_paragraph_content')
         mcp_server.tool(tools_state.get_figure_details, name='get_figure_details')
         mcp_server.tool(tools_state.extract_paragraph_citation, name='extract_paragraph_citation')
+        mcp_server.tool(tools_state.extract_whole_paragraph, name='extract_whole_paragraph')
         mcp_server.tool(tools_state.extract_figure, name='extract_figure')
 
         mcp_endpoint = mcp_server.http_app(transport='streamable-http')

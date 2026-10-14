@@ -197,6 +197,22 @@ class EnrichmentTools:
 
         self._footnote.components.append(citation_paragraph)
 
+    def extract_whole_paragraph(self, path_to_paragraph: str) -> None:
+        """Extracts the entire paragraph from the reference document and moves it to the footnote.
+
+        The whole content of the paragraph is added to the enriched footnote, as if it was cited
+        from its very beginning to its very end. This should be preferred over citing a fragment of
+        the paragraph if the entire paragraph is relevant to the concepts the footnote aims to
+        explain.
+
+        Args:
+            path_to_paragraph: The path to the paragraph in the reference document.
+        """
+
+        paragraph = self._obtain_paragraph(path_to_paragraph)
+
+        self._footnote.components.append(doc_models.Paragraph(elements=list(paragraph.elements)))
+
     def extract_figure(self, path_to_figure: str, subfigures_ids: list[str] | None = None) -> None:
         """Extracts a figure from the reference document and adds it to the footnote.
 
