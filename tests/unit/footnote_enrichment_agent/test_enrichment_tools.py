@@ -20,7 +20,9 @@ def sample_enrichment_tools():
                             component_id='paragraph_1',
                             elements=[
                                 'This is a formula: ',
-                                doc_models.MathExpression(expression='E=mc^2', format='LaTeX'),
+                                doc_models.MathExpression(
+                                    component_id='math_1', expression='E=mc^2', format='LaTeX'
+                                ),
                                 ' and these are referenced papers: ',
                                 doc_models.Reference(
                                     ref_type='citation', content_text='1', target='bib1'
@@ -77,7 +79,12 @@ def sample_enrichment_tools():
                                             table_contents='<table><tr><td>Sample table content</td></tr></table>',
                                         ),
                                     ],
-                                )
+                                ),
+                                doc_models.MathExpression(
+                                    component_id='equation_1',
+                                    expression='a^2 + b^2 = c^2',
+                                    format='LaTeX',
+                                ),
                             ],
                         ),
                     ],
@@ -129,7 +136,11 @@ class TestEnrichmentContext:
                                     'type': 'Figure',
                                     'component_path': '/sections/section_1/nested_section/figure_1',
                                     'caption': 'Sample figure caption.',
-                                }
+                                },
+                                {
+                                    'type': 'MathExpression',
+                                    'component_path': '/sections/section_1/nested_section/equation_1',
+                                },
                             ],
                         },
                     ],
@@ -348,3 +359,25 @@ class TestEnrichmentContext:
         assert len(extracted_figure.subfigures) == 2
         assert isinstance(extracted_figure.subfigures[0], doc_models.ImgSubfigure)
         assert isinstance(extracted_figure.subfigures[1], doc_models.TableSubfigure)
+
+    def test_extract_equation_raises_on_invalid_path(self, sample_enrichment_tools):
+        with pytest.raises(ValueError, match='Component not found in the document'):
+            sample_enrichment_tools.extract_equation('/invalid/path')
+
+    def test_extract_equation_raises_on_non_math_expression_path(self, sample_enrichment_tools):
+        with pytest.raises(ValueError, match='is not a math expression'):
+            sample_enrichment_tools.extract_equation('/sections/section_1/paragraph_1')
+
+        assert sample_enrichment_tools.footnote.components == []
+
+    def test_extract_equation_extracts_section_equation(self, sample_enrichment_tools):
+
+        sample_enrichment_tools.extract_equation('/sections/section_1/nested_section/equation_1')
+
+        assert len(sample_enrichment_tools.footnote.components) == 1
+
+        extracted_equation = sample_enrichment_tools.footnote.components[0]
+
+        assert isinstance(extracted_equation, doc_models.MathExpression)
+        assert extracted_equation.expression == 'a^2 + b^2 = c^2'
+        assert extracted_equation.format == 'LaTeX'

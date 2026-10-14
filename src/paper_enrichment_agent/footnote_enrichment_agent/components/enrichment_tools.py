@@ -259,6 +259,33 @@ class EnrichmentTools:
 
         self._footnote.components.append(extracted_figure)
 
+    def extract_equation(self, path_to_equation: str) -> None:
+        """Extracts an equation from the reference document and adds it to the footnote.
+
+        Equations are MathExpression components that are direct components of a section, i.e. they
+        are standalone (displayed) formulas rather than mathematical expressions embedded within a
+        paragraph's text. Inline expressions should be extracted together with the surrounding text
+        of the paragraph instead. Equations should be included in the enriched footnote if they are
+        referenced in the previously extracted textual content or are strictly relevant to the
+        concepts the footnote aims to explain.
+
+        Args:
+            path_to_equation: The path to the equation in the reference document.
+        """
+
+        equation = self._doc_getter.get_component_by_path(path_to_equation)
+
+        if not isinstance(equation, doc_models.MathExpression):
+            raise ValueError(f'Component at path {path_to_equation} is not a math expression.')
+
+        self._footnote.components.append(
+            doc_models.MathExpression(
+                expression=equation.expression,
+                format=equation.format,
+                component_id=equation.component_id,
+            )
+        )
+
     def _obtain_paragraph(self, path_to_paragraph: str) -> doc_models.Paragraph:
         """Locates and validates a paragraph in the reference document."""
 
