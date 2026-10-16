@@ -158,11 +158,11 @@ class TestEnrichmentContext:
 
     def test_set_footnote_title_updates_footnote(self, sample_enrichment_tools):
 
-        assert sample_enrichment_tools.footnote.title == ''
+        assert sample_enrichment_tools.generate_final_footnote().title == ''
 
         sample_enrichment_tools.set_footnote_title('Updated Footnote Title')
 
-        assert sample_enrichment_tools.footnote.title == 'Updated Footnote Title'
+        assert sample_enrichment_tools.generate_final_footnote().title == 'Updated Footnote Title'
 
     def test_get_element_content_raises_error_for_invalid_path(self, sample_enrichment_tools):
         with pytest.raises(ValueError, match='Component not found in the document'):
@@ -223,9 +223,9 @@ class TestEnrichmentContext:
             end_anchor='this is all.',
         )
 
-        assert len(sample_enrichment_tools.footnote.components) == 1
+        assert len(sample_enrichment_tools.generate_final_footnote().components) == 1
 
-        extracted_paragraph = sample_enrichment_tools.footnote.components[0]
+        extracted_paragraph = sample_enrichment_tools.generate_final_footnote().components[0]
 
         assert isinstance(extracted_paragraph, doc_models.Paragraph)
 
@@ -251,9 +251,9 @@ class TestEnrichmentContext:
             end_anchor='this is a reference',
         )
 
-        assert len(sample_enrichment_tools.footnote.components) == 1
+        assert len(sample_enrichment_tools.generate_final_footnote().components) == 1
 
-        extracted_paragraph = sample_enrichment_tools.footnote.components[0]
+        extracted_paragraph = sample_enrichment_tools.generate_final_footnote().components[0]
 
         assert isinstance(extracted_paragraph, doc_models.Paragraph)
 
@@ -271,9 +271,9 @@ class TestEnrichmentContext:
             end_anchor='a reference to element: Figure 3.1 and this is all!',
         )
 
-        assert len(sample_enrichment_tools.footnote.components) == 1
+        assert len(sample_enrichment_tools.generate_final_footnote().components) == 1
 
-        extracted_paragraph = sample_enrichment_tools.footnote.components[0]
+        extracted_paragraph = sample_enrichment_tools.generate_final_footnote().components[0]
 
         assert isinstance(extracted_paragraph, doc_models.Paragraph)
 
@@ -305,7 +305,7 @@ class TestEnrichmentContext:
                 end_anchor=end_anchor,
             )
 
-        assert sample_enrichment_tools.footnote.components == []
+        assert sample_enrichment_tools.generate_final_footnote().components == []
 
     def test_extract_paragraph_citation_error_describes_anchor_mismatch(
         self, sample_enrichment_tools
@@ -341,15 +341,15 @@ class TestEnrichmentContext:
         with pytest.raises(ValueError, match='is not a paragraph'):
             sample_enrichment_tools.extract_whole_paragraph('/sections/section_1/list_1')
 
-        assert sample_enrichment_tools.footnote.components == []
+        assert sample_enrichment_tools.generate_final_footnote().components == []
 
     def test_extract_whole_paragraph_extracts_all_elements(self, sample_enrichment_tools):
 
         sample_enrichment_tools.extract_whole_paragraph('/sections/section_1/paragraph_1')
 
-        assert len(sample_enrichment_tools.footnote.components) == 1
+        assert len(sample_enrichment_tools.generate_final_footnote().components) == 1
 
-        extracted_paragraph = sample_enrichment_tools.footnote.components[0]
+        extracted_paragraph = sample_enrichment_tools.generate_final_footnote().components[0]
 
         assert isinstance(extracted_paragraph, doc_models.Paragraph)
         assert len(extracted_paragraph.elements) == 11
@@ -383,9 +383,9 @@ class TestEnrichmentContext:
             subfigures_ids=['subfigure_1'],
         )
 
-        assert len(sample_enrichment_tools.footnote.components) == 1
+        assert len(sample_enrichment_tools.generate_final_footnote().components) == 1
 
-        extracted_figure = sample_enrichment_tools.footnote.components[0]
+        extracted_figure = sample_enrichment_tools.generate_final_footnote().components[0]
 
         assert isinstance(extracted_figure, doc_models.Figure)
 
@@ -400,9 +400,9 @@ class TestEnrichmentContext:
             subfigures_ids=None,
         )
 
-        assert len(sample_enrichment_tools.footnote.components) == 1
+        assert len(sample_enrichment_tools.generate_final_footnote().components) == 1
 
-        extracted_figure = sample_enrichment_tools.footnote.components[0]
+        extracted_figure = sample_enrichment_tools.generate_final_footnote().components[0]
 
         assert isinstance(extracted_figure, doc_models.Figure)
 
@@ -419,16 +419,65 @@ class TestEnrichmentContext:
         with pytest.raises(ValueError, match='is not a math expression'):
             sample_enrichment_tools.extract_equation('/sections/section_1/paragraph_1')
 
-        assert sample_enrichment_tools.footnote.components == []
+        assert sample_enrichment_tools.generate_final_footnote().components == []
 
     def test_extract_equation_extracts_section_equation(self, sample_enrichment_tools):
 
         sample_enrichment_tools.extract_equation('/sections/section_1/nested_section/equation_1')
 
-        assert len(sample_enrichment_tools.footnote.components) == 1
+        assert len(sample_enrichment_tools.generate_final_footnote().components) == 1
 
-        extracted_equation = sample_enrichment_tools.footnote.components[0]
+        extracted_equation = sample_enrichment_tools.generate_final_footnote().components[0]
 
         assert isinstance(extracted_equation, doc_models.MathExpression)
         assert extracted_equation.expression == 'a^2 + b^2 = c^2'
         assert extracted_equation.format == 'LaTeX'
+
+
+class TestGenerateFinalFootnote:
+    def test_generate_final_footnote_arranges_components_in_source_document_order(
+        self, sample_enrichment_tools
+    ):
+
+        sample_enrichment_tools.extract_equation('/sections/section_1/nested_section/equation_1')
+        sample_enrichment_tools.extract_figure(
+            '/sections/section_1/nested_section/figure_1', subfigures_ids=None
+        )
+        sample_enrichment_tools.extract_whole_paragraph('/sections/section_1/list_1/list_item_2')
+        sample_enrichment_tools.extract_whole_paragraph('/footnotes/footnote_1')
+        sample_enrichment_tools.extract_paragraph_citation(
+            path_to_paragraph='/sections/section_1/paragraph_1',
+            begin_anchor='a formula:',
+            end_anchor='this is all.',
+        )
+
+        components = sample_enrichment_tools.generate_final_footnote().components
+
+        assert len(components) == 5
+        assert components[0].elements[0] == 'a formula: '
+        assert components[1].elements == ['List item 2']
+        assert isinstance(components[2], doc_models.Figure)
+        assert isinstance(components[3], doc_models.MathExpression)
+        assert components[4].elements == ['Sample footnote.']
+
+    def test_generate_final_footnote_keeps_extraction_order_for_same_source(
+        self, sample_enrichment_tools
+    ):
+
+        sample_enrichment_tools.extract_paragraph_citation(
+            path_to_paragraph='/sections/section_1/paragraph_1',
+            begin_anchor='and this is all.',
+            end_anchor='Thank you.',
+        )
+        sample_enrichment_tools.extract_paragraph_citation(
+            path_to_paragraph='/sections/section_1/paragraph_1',
+            begin_anchor='This is a formula:',
+            end_anchor='This is a formula:',
+        )
+
+        components = sample_enrichment_tools.generate_final_footnote().components
+
+        assert [c.elements for c in components] == [
+            ['and this is all. Thank you.'],
+            ['This is a formula:'],
+        ]

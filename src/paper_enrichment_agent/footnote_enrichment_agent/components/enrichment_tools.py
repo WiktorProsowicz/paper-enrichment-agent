@@ -20,6 +20,12 @@ class EnrichmentTools:
     enrichment.
     2. The state of the built footnote, modified by the enrichment agent.
 
+    The extraction tools do not modify the footnote directly. Instead, they record the extracted
+    components together with the ids of the reference document components they come from. The
+    footnote is composed on demand, with the extracted components arranged according to the order
+    of their source components in the reference document, regardless of the order in which they
+    were extracted.
+
     The agent using the enrichment tools is by design not expected to know the full structure of
     the document, down to the furthest leaf in the tree. This applies especially to paragraphs,
     which typically contain multiple elements and should be therefore rendered as continuous text.
@@ -40,12 +46,35 @@ class EnrichmentTools:
 
         self._document = reference_document
         self._doc_getter = document_manipulators.DocumentGetter(self._document)
-        self._footnote = doc_models.Section(title='', components=[])
+        self._footnote_title = ''
+        self._extracted_components: list[doc_models.Section.SectionComponent] = []
 
-    @property
-    def footnote(self) -> doc_models.Section:
-        """Returns the current state of the footnote being enriched."""
-        return self._footnote
+        # Maps the ids of the extracted components to the ids of their source components in the
+        # reference document.
+        self._source_ids: dict[str, str] = {}
+
+    def generate_final_footnote(self) -> doc_models.Section:
+        """Returns the footnote composed from the current state of the enrichment.
+
+        The footnote is composed from the components extracted so far, arranged according to the
+        order of their source components in the reference document. Components extracted from the
+        same source component keep the order in which they were extracted.
+        """
+
+        source_order: dict[str, int] = {}
+
+        for position, component in enumerate(
+            self._doc_getter.iter_components_of_type(doc_models.DocumentComponent)
+        ):
+            source_order.setdefault(component.component_id, position)
+
+        return doc_models.Section(
+            title=self._footnote_title,
+            components=sorted(
+                self._extracted_components,
+                key=lambda c: source_order[self._source_ids[c.component_id]],
+            ),
+        )
 
     def get_document_tree(self) -> DocumentTree:
         """Returns a tree representation of the reference document.
@@ -81,7 +110,7 @@ class EnrichmentTools:
         Args:
             title: The title to be set.
         """
-        self._footnote.title = title
+        self._footnote_title = title
 
     def get_element_content(self, path_to_element: str) -> str:
         """Returns the content of an element in the reference document.
@@ -213,7 +242,7 @@ class EnrichmentTools:
             else:
                 citation_paragraph.elements.extend(elements)
 
-        self._footnote.components.append(citation_paragraph)
+        self._add_extracted_component(citation_paragraph, paragraph.component_id)
 
     def extract_whole_paragraph(self, path_to_paragraph: str) -> None:
         """Extracts the entire paragraph from the reference document and moves it to the footnote.
@@ -229,7 +258,9 @@ class EnrichmentTools:
 
         paragraph = self._obtain_paragraph(path_to_paragraph)
 
-        self._footnote.components.append(doc_models.Paragraph(elements=list(paragraph.elements)))
+        self._add_extracted_component(
+            doc_models.Paragraph(elements=list(paragraph.elements)), paragraph.component_id
+        )
 
     def extract_figure(self, path_to_figure: str, subfigures_ids: list[str] | None = None) -> None:
         """Extracts a figure from the reference document and adds it to the footnote.
@@ -275,7 +306,7 @@ class EnrichmentTools:
             component_id=figure.component_id,
         )
 
-        self._footnote.components.append(extracted_figure)
+        self._add_extracted_component(extracted_figure, figure.component_id)
 
     def extract_equation(self, path_to_equation: str) -> None:
         """Extracts an equation from the reference document and adds it to the footnote.
@@ -296,13 +327,22 @@ class EnrichmentTools:
         if not isinstance(equation, doc_models.MathExpression):
             raise ValueError(f'Component at path {path_to_equation} is not a math expression.')
 
-        self._footnote.components.append(
+        self._add_extracted_component(
             doc_models.MathExpression(
                 expression=equation.expression,
                 format=equation.format,
                 component_id=equation.component_id,
-            )
+            ),
+            equation.component_id,
         )
+
+    def _add_extracted_component(
+        self, component: doc_models.Section.SectionComponent, source_component_id: str
+    ) -> None:
+        """Records a component extracted into the footnote together with its source id."""
+
+        self._extracted_components.append(component)
+        self._source_ids[component.component_id] = source_component_id
 
     def _obtain_paragraph(self, path_to_paragraph: str) -> doc_models.Paragraph:
         """Locates and validates a paragraph in the reference document."""

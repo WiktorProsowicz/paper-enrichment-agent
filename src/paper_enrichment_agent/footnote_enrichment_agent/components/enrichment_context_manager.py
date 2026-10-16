@@ -65,7 +65,7 @@ class EnrichmentContextManager:
                 f'Enrichment tools for session {session_id} are not set up.'
             )
 
-        return self._tools_states[session_id].footnote
+        return self._tools_states[session_id].generate_final_footnote()
 
     @asynccontextmanager
     async def setup_mcp_for_agent_session(
