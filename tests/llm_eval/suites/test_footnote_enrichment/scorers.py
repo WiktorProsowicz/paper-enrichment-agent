@@ -266,13 +266,13 @@ def paragraphs_extracted_before_revealing(trace: Trace) -> Feedback:
     extraction_spans = [
         span
         for span in trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
-        if span.attributes['tool_name'] == 'extract_paragraph_citation'
+        if span.attributes['tool_name'] in ('extract_paragraph_citation', 'extract_whole_paragraph')
     ]
 
     reveal_spans = [
         span
         for span in trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
-        if span.attributes['tool_name'] == 'get_paragraph_content'
+        if span.attributes['tool_name'] == 'get_element_content'
     ]
 
     return Feedback(
@@ -284,7 +284,7 @@ def paragraphs_extracted_before_revealing(trace: Trace) -> Feedback:
                 for reveal_span in reveal_spans
                 if (
                     extraction_span.inputs['path_to_paragraph']
-                    == reveal_span.inputs['path_to_paragraph']
+                    == reveal_span.inputs['path_to_element']
                 )
             )
         )
@@ -304,7 +304,7 @@ def figures_extracted_before_revealing(trace: Trace) -> Feedback:
     reveal_spans = [
         span
         for span in trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
-        if span.attributes['tool_name'] == 'get_figure_details'
+        if span.attributes['tool_name'] == 'get_element_content'
     ]
 
     return Feedback(
@@ -315,7 +315,8 @@ def figures_extracted_before_revealing(trace: Trace) -> Feedback:
                 reveal_span.start_time_ns < extraction_span.start_time_ns
                 for reveal_span in reveal_spans
                 if (
-                    extraction_span.inputs['path_to_figure'] == reveal_span.inputs['path_to_figure']
+                    extraction_span.inputs['path_to_figure']
+                    == reveal_span.inputs['path_to_element']
                 )
             )
         )
@@ -416,20 +417,21 @@ def _render_revealed_paragraphs(trace: Trace, reference_document: doc_models.Doc
     """Renders the paragraphs whose contents were successfully revealed to the agent.
 
     The paragraphs are re-rendered from the reference document the same way the
-    `get_paragraph_content` tool does, ordered by their first reveal.
+    `get_element_content` tool does, ordered by their first reveal. Revealed figures and
+    equations are skipped.
     """
 
     reveal_spans = sorted(
         (
             span
             for span in trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
-            if span.attributes['tool_name'] == 'get_paragraph_content'
+            if span.attributes['tool_name'] == 'get_element_content'
             and not span.attributes['tool_is_error']
         ),
         key=lambda span: span.start_time_ns,
     )
 
-    revealed_paths = list(dict.fromkeys(span.inputs['path_to_paragraph'] for span in reveal_spans))
+    revealed_paths = list(dict.fromkeys(span.inputs['path_to_element'] for span in reveal_spans))
 
     doc_getter = document_manipulators.DocumentGetter(reference_document)
 
@@ -440,8 +442,7 @@ def _render_revealed_paragraphs(trace: Trace, reference_document: doc_models.Doc
 
         if isinstance(paragraph, doc_models.Paragraph):
             rendered_paragraphs.append(
-                f'Paragraph (path: {path}):\n'
-                + ''.join(e.str_content for e in doc_utils.stringify_paragraph_elements(paragraph))
+                f'Paragraph (path: {path}):\n' + doc_utils.render_paragraph(paragraph)
             )
 
     return '\n\n'.join(rendered_paragraphs)
@@ -475,9 +476,7 @@ def _stringify_generated_footnote(footnote: doc_models.Section) -> str:
 
     for component in footnote.components:
         if isinstance(component, doc_models.Paragraph):
-            str_components.append(
-                ''.join(e.str_content for e in doc_utils.stringify_paragraph_elements(component))
-            )
+            str_components.append(doc_utils.render_paragraph(component))
 
         elif isinstance(component, doc_models.Figure):
             str_components.append(
@@ -489,5 +488,8 @@ def _stringify_generated_footnote(footnote: doc_models.Section) -> str:
                     if isinstance(subfigure, doc_models.ImgSubfigure)
                 )
             )
+
+        elif isinstance(component, doc_models.MathExpression):
+            str_components.append(f'Equation ({component.format}): {component.expression}')
 
     return '\n\n'.join(str_components)

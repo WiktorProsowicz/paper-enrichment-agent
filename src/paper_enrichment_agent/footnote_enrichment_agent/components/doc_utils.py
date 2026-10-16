@@ -125,3 +125,36 @@ def get_context_of_citation_in_paragraph(
     context_end_idx = min(len(paragraph_str), citation_end + n_context_chars // 2)
 
     return paragraph_str[context_start_idx:context_end_idx]
+
+
+def render_paragraph(paragraph: doc_models.Paragraph) -> str:
+    """Renders the textual content of a paragraph.
+
+    The content is the concatenation of the stringified paragraph elements (see
+    :func:`stringify_paragraph_elements`), with consecutive citations grouped together.
+    """
+
+    return ''.join(e.str_content for e in stringify_paragraph_elements(paragraph))
+
+
+def render_figure(figure: doc_models.Figure) -> str:
+    """Renders the caption of a figure and the captions of its subfigures.
+
+    Each subfigure is listed together with its type and id, so that the rendered figure can be used
+    to select the subfigures to extract.
+    """
+
+    return (
+        f'Caption: {figure.caption}\n'
+        + 'Subfigures:\n'
+        + '\n'.join(
+            f'\t{subfigure.__class__.__name__} (id: {subfigure.component_id}): {subfigure.caption}'
+            for subfigure in figure.subfigures
+        )
+    )
+
+
+def render_equation(equation: doc_models.MathExpression) -> str:
+    """Renders the format and the source of a mathematical expression."""
+
+    return f'Format: {equation.format}\nExpression: {equation.expression}'

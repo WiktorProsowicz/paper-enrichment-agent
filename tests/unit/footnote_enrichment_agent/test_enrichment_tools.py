@@ -164,24 +164,36 @@ class TestEnrichmentContext:
 
         assert sample_enrichment_tools.footnote.title == 'Updated Footnote Title'
 
-    def test_get_paragraph_content_raises_error_for_invalid_path(self, sample_enrichment_tools):
+    def test_get_element_content_raises_error_for_invalid_path(self, sample_enrichment_tools):
         with pytest.raises(ValueError, match='Component not found in the document'):
-            sample_enrichment_tools.get_paragraph_content('/invalid/path')
+            sample_enrichment_tools.get_element_content('/invalid/path')
 
-    def test_get_paragraph_content_raises_error_for_non_paragraph_path(
-        self, sample_enrichment_tools
+    @pytest.mark.parametrize(
+        ('path_to_element', 'element_type'),
+        [
+            ('/sections/section_1/list_1', 'List'),
+            ('/sections/section_1/nested_section', 'Section'),
+        ],
+    )
+    def test_get_element_content_raises_error_for_unreadable_element(
+        self, sample_enrichment_tools, path_to_element, element_type
     ):
-        with pytest.raises(ValueError, match='is not a paragraph'):
-            sample_enrichment_tools.get_paragraph_content('/sections/section_1/list_1')
+        with pytest.raises(ValueError) as exc_info:
+            sample_enrichment_tools.get_element_content(path_to_element)
 
-    def test_get_paragraph_content_returns_stringified_paragraph(self, sample_enrichment_tools):
+        error_message = str(exc_info.value)
+
+        assert f'is a {element_type}, whose content cannot be read' in error_message
+        assert 'Readable element types: Paragraph, Figure, MathExpression' in error_message
+
+    def test_get_element_content_returns_stringified_paragraph(self, sample_enrichment_tools):
 
         path_to_paragraph = '/sections/section_1/paragraph_1'
         expected_content = 'This is a formula: $E=mc^2$ and these are referenced papers: [1, 2, 3] and this is a link: http://example.com and this is a reference to element: Figure 3.1 and this is all. Thank you.'
 
-        assert sample_enrichment_tools.get_paragraph_content(path_to_paragraph) == expected_content
+        assert sample_enrichment_tools.get_element_content(path_to_paragraph) == expected_content
 
-    def test_get_figure_details_returns_stringified_figure(self, sample_enrichment_tools):
+    def test_get_element_content_returns_stringified_figure(self, sample_enrichment_tools):
 
         path_to_figure = '/sections/section_1/nested_section/figure_1'
 
@@ -192,7 +204,16 @@ class TestEnrichmentContext:
             '\tTableSubfigure (id: subfigure_2): Sample subfigure caption.'
         )
 
-        assert sample_enrichment_tools.get_figure_details(path_to_figure) == expected_details
+        assert sample_enrichment_tools.get_element_content(path_to_figure) == expected_details
+
+    def test_get_element_content_returns_stringified_equation(self, sample_enrichment_tools):
+
+        path_to_equation = '/sections/section_1/nested_section/equation_1'
+
+        assert (
+            sample_enrichment_tools.get_element_content(path_to_equation)
+            == 'Format: LaTeX\nExpression: a^2 + b^2 = c^2'
+        )
 
     def test_extract_paragraph_citation_keeps_necessary_components(self, sample_enrichment_tools):
 

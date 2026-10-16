@@ -32,6 +32,10 @@ class EnrichmentTools:
     # the anchor to be located.
     _MIN_ANCHOR_MATCH_RATIO = 0.95
 
+    # The types of components whose content can be read with `get_element_content`. The remaining
+    # types only group other components and are navigated through the tree of contents.
+    _READABLE_COMPONENT_TYPES = (doc_models.Paragraph, doc_models.Figure, doc_models.MathExpression)
+
     def __init__(self, reference_document: doc_models.Document) -> None:
 
         self._document = reference_document
@@ -79,32 +83,33 @@ class EnrichmentTools:
         """
         self._footnote.title = title
 
-    def get_paragraph_content(self, path_to_paragraph: str) -> str:
-        """Returns the content of a paragraph in the reference document.
+    def get_element_content(self, path_to_element: str) -> str:
+        """Returns the content of an element in the reference document.
 
-        The textual content of the paragraph, composed from its elements, such as references,
-        links, text fragments etc. Note that the content is rendered the way a human would see
-        it on paper, i.e. with no markup or formatting metadata. Therefore, if the text refers
-        to an element, e.g. a figure, its placement should be inferred from the context, e.g.
-        "as shown in Figure 3.2" suggests the figure should be placed in the subsection 2 of
-        the section 3.
+        Use this tool to read an element before deciding whether to extract it into the footnote.
+        Only the following element types can be read: Paragraph, Figure and MathExpression. Other
+        elements, such as Section or List, only group other elements, so use the tree of contents to
+        find the paths of the elements they contain and read those instead.
 
-        Args:
-            path_to_paragraph: The path to the paragraph in the reference document.
-        """
+        The content returned for each element type:
+        - Paragraph: the textual content of the paragraph, composed from its elements, such as
+            references, links, text fragments etc. The content is rendered the way a human would
+            see it on paper, i.e. with no markup or formatting metadata, except for inline math,
+            which is kept as its source enclosed in "$" signs. Therefore, if the text refers to an
+            element, e.g. a figure, its placement should be inferred from the context, e.g. "as
+            shown in Figure 3.2" suggests the figure should be placed in the subsection 2 of the
+            section 3.
+        - Figure: the caption of the figure and the list of its subfigures. Each subfigure is
+            listed together with its id, which can be used to extract only the chosen subfigures
+            of the figure.
+        - MathExpression: the format and the source of a standalone equation.
 
-        paragraph = self._obtain_paragraph(path_to_paragraph)
-        stringified_elements = doc_utils.stringify_paragraph_elements(paragraph)
+        ## Example output (Paragraph)
+        The two most commonly used attention functions are additive attention [2], and dot-product
+        (multiplicative) attention. Dot-product attention is identical to our algorithm, except for
+        the scaling factor of $1 / sqrt(d)$.
 
-        return ''.join(e.str_content for e in stringified_elements)
-
-    def get_figure_details(self, path_to_figure: str) -> str:
-        """Returns the details describing a given figure in the reference document.
-
-        Each subfigure is listed together with its id, which can be used to extract only the chosen
-        subfigures of the figure.
-
-        ## Example output
+        ## Example output (Figure)
         Caption: A diagram illustrating the architecture of the Transformer model.
         Subfigures:
             ImgSubfigure (id: subfigure_1): A schematic representation of the multi-head attention
@@ -113,24 +118,32 @@ class EnrichmentTools:
                 Transformer model.
             ...
 
+        ## Example output (MathExpression)
+        Format: LaTeX
+        Expression: \\mathrm{Attention}(Q, K, V) = \\mathrm{softmax}(QK^T / \\sqrt{d_k}) V
+
         Args:
-            path_to_figure: The path to the figure in the reference document.
+            path_to_element: The path to the element in the reference document.
         """
 
-        figure = self._doc_getter.get_component_by_path(path_to_figure)
+        element = self._doc_getter.get_component_by_path(path_to_element)
 
-        if not isinstance(figure, doc_models.Figure):
-            raise ValueError(f'Component at path {path_to_figure} is not a figure.')
+        if not isinstance(element, self._READABLE_COMPONENT_TYPES):
+            readable_types = ', '.join(t.__name__ for t in self._READABLE_COMPONENT_TYPES)
 
-        return (
-            f'Caption: {figure.caption}\n'
-            + 'Subfigures:\n'
-            + '\n'.join(
-                f'\t{subfigure.__class__.__name__} (id: {subfigure.component_id}): '
-                f'{subfigure.caption}'
-                for subfigure in figure.subfigures
+            raise ValueError(
+                f'Component at path {path_to_element} is a {element.__class__.__name__}, whose '
+                f'content cannot be read. Readable element types: {readable_types}. Use the tree '
+                'of contents to find the paths of the readable elements it contains.'
             )
-        )
+
+        if isinstance(element, doc_models.Paragraph):
+            return doc_utils.render_paragraph(element)
+
+        if isinstance(element, doc_models.Figure):
+            return doc_utils.render_figure(element)
+
+        return doc_utils.render_equation(element)
 
     def extract_paragraph_citation(
         self, path_to_paragraph: str, begin_anchor: str, end_anchor: str
