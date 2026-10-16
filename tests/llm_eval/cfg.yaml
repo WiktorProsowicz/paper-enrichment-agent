@@ -8,6 +8,7 @@ judge_llm_config:
   api_key: ''
   model_params:
     temperature: 0.3
+    request_timeout: 600
 
 suite_configs:
   test_footnote_enrichment:

@@ -21,9 +21,21 @@ from llm_eval import core as harness_core
 from paper_enrichment_agent.common import mlflow_setup
 
 
+# Hard limit (in seconds) for a single test case, including prediction and scoring. MLflow does not
+# time out scorers, so a hung judge call would otherwise block the evaluation indefinitely.
+_TEST_CASE_HARD_TIMEOUT = 2 * 60 * 60
+
+
 def pytest_configure(config: pytest.Config) -> None:
     if not config.pluginmanager.hasplugin('mlflow.pytest.plugin'):
         raise pytest.UsageError('tests/llm_eval requires the MLflow pytest plugin')
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Applies the hard timeout to every evaluation test case."""
+
+    for item in items:
+        item.add_marker(pytest.mark.timeout(_TEST_CASE_HARD_TIMEOUT))
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -123,8 +135,14 @@ def suite_run(
                 failure_message = getattr(
                     request.node, 'failure_message', 'The test case did not run.'
                 )
+                # Keeps the note set during validation, e.g. the warnings about missing metrics.
+                existing_note = mlflow.get_run(run.info.run_id).data.tags.get(
+                    'mlflow.note.content', ''
+                )
                 mlflow.set_tag(
-                    'mlflow.note.content', f'**Test case failed**\n\n```\n{failure_message}\n```'
+                    'mlflow.note.content',
+                    f'**Test case failed**\n\n```\n{failure_message}\n```'
+                    + (f'\n\n{existing_note}' if existing_note else ''),
                 )
                 mlflow.end_run(status='FAILED')
 

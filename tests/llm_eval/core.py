@@ -78,14 +78,34 @@ def validate_results(
 ) -> str | None:
     """Validates the aggregate scores and records the verdict on the run.
 
+    A threshold whose metric is missing from the results (e.g. a scorer returned no feedback,
+    because the measured behaviour did not occur) does not fail the test case. Instead, a warning
+    about it is set as the run's markdown description.
+
     Args:
         run_id: The run opened for the test case being scored.
         result: What ``mlflow.genai.evaluate`` returned.
         thresholds: Minimal mean value per scorer. Scorers left out are only logged.
 
     Returns:
-        MLflow's failure message, or None when every scorer cleared its threshold.
+        MLflow's failure message, or None when every present metric cleared its threshold.
     """
+
+    client = MlflowClient()
+
+    missing_metrics = sorted(name for name in thresholds if name not in result.metrics)
+
+    if missing_metrics:
+        client.set_tag(
+            run_id,
+            'mlflow.note.content',
+            '**Warnings**\n\n'
+            + '\n'.join(
+                f'- Metric `{name}` is missing from the results, its threshold '
+                f'({thresholds[name]}) was not checked.'
+                for name in missing_metrics
+            ),
+        )
 
     failure_reason: str | None = None
 
@@ -94,13 +114,13 @@ def validate_results(
             validation_thresholds={
                 name: MetricThreshold(threshold=value, greater_is_better=True)
                 for name, value in thresholds.items()
+                if name in result.metrics
             },
             candidate_result=result,  # type: ignore[arg-type]
         )
     except ModelValidationFailedException as e:
         failure_reason = str(e)
 
-    client = MlflowClient()
     for name, value in result.metrics.items():
         client.log_metric(run_id, name, value)
 
