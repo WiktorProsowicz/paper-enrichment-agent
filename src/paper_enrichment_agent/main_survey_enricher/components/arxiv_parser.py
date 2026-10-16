@@ -391,14 +391,20 @@ class ArxivParser:
         )
 
     def _extract_document_title(self, soup: bs4.BeautifulSoup) -> str:
-        """Extracts the title from the arXiv paper."""
+        """Extracts the title from the arXiv paper.
+
+        Only the top-level text of the title tag is taken, since notes attached to the title
+        (e.g. footnotes or `\\thanks` acknowledgements) are rendered inline as nested tags.
+        """
 
         title_tag = soup.select_one('h1.ltx_title')
 
         if not title_tag:
             raise self.ParsingError('Failed to extract title from arXiv paper.')
 
-        return self._extract_clean_text(title_tag)
+        title_text = ' '.join(title_tag.find_all(string=True, recursive=False))
+
+        return re.sub(r'\s+', ' ', title_text).strip()
 
     def _extract_abstract(self, soup: bs4.BeautifulSoup) -> str:
         """Extracts the abstract from the arXiv paper."""

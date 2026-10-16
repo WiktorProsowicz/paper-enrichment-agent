@@ -14,6 +14,7 @@ EXAMPLE_PAPER_3 = '1706.03762'
 EXAMPLE_PAPER_4 = '1409.0473'
 EXAMPLE_PAPER_5 = '1905.06791'
 EXAMPLE_PAPER_6 = '1506.03099'
+EXAMPLE_PAPER_7 = '1902.10245'
 
 EXAMPLE_PAPERS = [
     # FastSpeech: Fast, Robust and Controllable Text to Speech
@@ -51,6 +52,12 @@ EXAMPLE_PAPERS = [
         'id': EXAMPLE_PAPER_6,
         'path': pathlib.Path(__file__).parent / f'example_arxiv_paper_{EXAMPLE_PAPER_6}.html',
         'url': f'https://ar5iv.labs.arxiv.org/html/{EXAMPLE_PAPER_6}',
+    },
+    # Non-Autoregressive Machine Translation with Auxiliary Regularization
+    {
+        'id': EXAMPLE_PAPER_7,
+        'path': pathlib.Path(__file__).parent / f'example_arxiv_paper_{EXAMPLE_PAPER_7}.html',
+        'url': f'https://ar5iv.labs.arxiv.org/html/{EXAMPLE_PAPER_7}',
     },
 ]
 
@@ -100,6 +107,10 @@ class TestArxivParser:
             (
                 EXAMPLE_PAPER_4,
                 'Neural Machine Translation by Jointly Learning to Align and Translate',
+            ),
+            (
+                EXAMPLE_PAPER_7,
+                'Non-Autoregressive Machine Translation with Auxiliary Regularization',
             ),
         ],
     )
