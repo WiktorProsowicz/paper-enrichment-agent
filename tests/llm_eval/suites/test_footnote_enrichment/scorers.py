@@ -364,7 +364,11 @@ def spawn_specific_tool_usage_metrics(tool_name: str) -> Scorer:
     """Spawns a metric for tracking the usage of a specific tool."""
 
     def specific_tool_usage_metrics(trace: Trace) -> list[Feedback]:
-        """Measures the call count for a specific tool."""
+        """Measures the call count and the success rate for a specific tool.
+
+        The success rate is not reported if the tool was not called, so that the run is not
+        scored on (and validated against) a behaviour that did not occur.
+        """
         call_tool_spans = [
             span
             for span in trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
@@ -375,13 +379,16 @@ def spawn_specific_tool_usage_metrics(tool_name: str) -> Scorer:
             span for span in call_tool_spans if not span.attributes['tool_is_error']
         ]
 
+        call_count_feedback = Feedback(name=f'call_count:{tool_name}', value=len(call_tool_spans))
+
+        if not call_tool_spans:
+            return [call_count_feedback]
+
         return [
-            Feedback(name=f'call_count:{tool_name}', value=len(call_tool_spans)),
+            call_count_feedback,
             Feedback(
                 name=f'success_rate:{tool_name}',
-                value=(
-                    len(successful_tool_calls) / len(call_tool_spans) if call_tool_spans else 0.0
-                ),
+                value=len(successful_tool_calls) / len(call_tool_spans),
             ),
         ]
 
