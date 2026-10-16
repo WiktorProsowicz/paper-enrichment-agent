@@ -20,3 +20,5 @@ The citation, you're meant to prepare the enriched footnote for, occurred in the
 Additional information about the survey's fragment that cites the referenced paper: {citation_context_info}
 
 Using the shipped enrichment-state-manipulation tools, build a footnote that properly explains the core contents of the referenced paper. After you're done using the tools, generate a concise summary that will be used as the prelude of the footnote. It should be a fragment of the abstract that describes the part of the cited paper that has been extracted into the footnote. This is the moment, where the footnote will be expected to be ready to be extracted from the enrichment state.
+
+IMPORTANT: Your final response is inserted verbatim into the textbook as the prelude of the footnote. It must contain ONLY the prelude text itself. Do not include any reasoning, summary of the actions you took, comments about the tools or the footnote, or messages addressed to the user (e.g. "Here is the prelude:", "I have extracted...", "Let me know if...").
