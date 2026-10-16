@@ -171,7 +171,16 @@ class ArxivParser:
                     elif 'ltx_equationgroup' in paragraph_tag['class']:
                         collected_equations: list[doc_models.MathExpression] = []
 
-                        for equation_tag in paragraph_tag.select('tbody'):
+                        # A group of separately numbered equations keeps each one in its own
+                        # `tbody` with an id. A single numbered equation spanning multiple rows
+                        # has an anonymous `tbody` and is identified by the id of the group.
+                        equation_tags = [
+                            tbody_tag
+                            for tbody_tag in paragraph_tag.select('tbody')
+                            if 'id' in tbody_tag.attrs
+                        ] or [paragraph_tag]
+
+                        for equation_tag in equation_tags:
                             equation = self._decode_equation(equation_tag)
 
                             self._referencable_components[equation.component_id] = equation

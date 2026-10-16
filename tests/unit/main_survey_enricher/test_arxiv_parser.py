@@ -12,6 +12,7 @@ EXAMPLE_PAPER_1 = '1905.09263'
 EXAMPLE_PAPER_2 = '2006.04558'
 EXAMPLE_PAPER_3 = '1706.03762'
 EXAMPLE_PAPER_4 = '1409.0473'
+EXAMPLE_PAPER_5 = '1905.06791'
 
 EXAMPLE_PAPERS = [
     # FastSpeech: Fast, Robust and Controllable Text to Speech
@@ -37,6 +38,12 @@ EXAMPLE_PAPERS = [
         'id': EXAMPLE_PAPER_4,
         'path': pathlib.Path(__file__).parent / f'example_arxiv_paper_{EXAMPLE_PAPER_4}.html',
         'url': f'https://ar5iv.labs.arxiv.org/html/{EXAMPLE_PAPER_4}',
+    },
+    # Almost Unsupervised Text to Speech and Automatic Speech Recognition
+    {
+        'id': EXAMPLE_PAPER_5,
+        'path': pathlib.Path(__file__).parent / f'example_arxiv_paper_{EXAMPLE_PAPER_5}.html',
+        'url': f'https://ar5iv.labs.arxiv.org/html/{EXAMPLE_PAPER_5}',
     },
 ]
 
@@ -254,6 +261,59 @@ class TestArxivParser:
             r'\displaystyle PE_{(pos,2i+1)}=cos(pos/10000^{2i/d_{\text{model}}})'
             in equation_contents[5]
         )
+
+    def test_parses_separately_numbered_equations_in_group(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_4)
+        doc_getter = DocumentGetter(document)
+
+        equation_1 = doc_getter.get_component_by_path('/sections/S2/S2.SS1/S2.E1')
+        equation_2 = doc_getter.get_component_by_path('/sections/S2/S2.SS1/S2.E2')
+
+        assert isinstance(equation_1, doc_models.MathExpression)
+        assert isinstance(equation_2, doc_models.MathExpression)
+        assert equation_1.expression != equation_2.expression
+
+    def test_parses_multi_row_equation_in_group_as_single_equation(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_5)
+        doc_getter = DocumentGetter(document)
+
+        equation_ids = [
+            equation.component_id
+            for equation in doc_getter.iter_components_of_type(doc_models.MathExpression)
+            if equation.description == 'Equation'
+        ]
+
+        assert equation_ids == [
+            'S2.E1',
+            'S3.E2',
+            'S3.E3',
+            'S3.E4',
+            'S3.E5',
+            'S3.E6',
+            'S3.E7',
+            'S3.E8',
+            'S3.E9',
+        ]
+
+        equation = doc_getter.get_component_by_path('/sections/S3/S3.SS3/S3.E6')
+
+        assert isinstance(equation, doc_models.MathExpression)
+        assert equation.expression.startswith(r'\displaystyle\mathcal{L}^{\overrightarrow{dae}}=')
+        assert r'\displaystyle\mathcal{L}^{\overleftarrow{dae}}=' in equation.expression
+        assert equation.expression.endswith(r'\theta^{\mathcal{T}}_{dec}),')
+
+    def test_resolves_references_to_multi_row_equation(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_5)
+        doc_getter = DocumentGetter(document)
+
+        reference = doc_getter.get_component_by_path('/sections/S3/S3.SS3/S3.SS3.p5.1/1')
+
+        assert isinstance(reference, doc_models.Reference)
+        assert reference.ref_type == 'element'
+        assert reference.target == '/sections/S3/S3.SS3/S3.E6'
 
     def test_parses_correct_referenced_papers(self, mock_example_paper):
 
