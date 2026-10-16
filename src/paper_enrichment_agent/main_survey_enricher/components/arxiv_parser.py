@@ -195,9 +195,10 @@ class ArxivParser:
                         components.append(self._decode_list(paragraph_tag))
 
             elif child.name == 'figure':
-                figure = self._decode_figure(child)
-                self._referencable_components[figure.component_id] = figure
-                components.append(figure)
+                for figure_tag in self._select_figure_tags(child):
+                    figure = self._decode_figure(figure_tag)
+                    self._referencable_components[figure.component_id] = figure
+                    components.append(figure)
 
             elif child.name == 'section' and any(
                 cl in list(child['class']) for cl in self._ALLOWED_SECTION_CLASSES
@@ -240,6 +241,24 @@ class ArxivParser:
             expression=expression,
             format='LaTeX',
         )
+
+    def _select_figure_tags(self, figure_tag: bs4.Tag) -> list[bs4.Tag]:
+        """Returns the tags of the figures contained in the given `figure` tag.
+
+        A `figure` tag without its own caption may be a layout container placing independent,
+        separately captioned figures side by side. In such case the nested figures are returned.
+        """
+
+        if figure_tag.select_one(':scope > figcaption.ltx_caption'):
+            return [figure_tag]
+
+        nested_figure_tags = [
+            nested_tag
+            for nested_tag in figure_tag.select('figure.ltx_figure')
+            if nested_tag.find_parent('figure') is figure_tag
+        ]
+
+        return nested_figure_tags or [figure_tag]
 
     def _decode_figure(self, figure_tag: bs4.Tag) -> doc_models.Figure:
         """Decodes a figure from the given `figure` tag paper."""

@@ -13,6 +13,7 @@ EXAMPLE_PAPER_2 = '2006.04558'
 EXAMPLE_PAPER_3 = '1706.03762'
 EXAMPLE_PAPER_4 = '1409.0473'
 EXAMPLE_PAPER_5 = '1905.06791'
+EXAMPLE_PAPER_6 = '1506.03099'
 
 EXAMPLE_PAPERS = [
     # FastSpeech: Fast, Robust and Controllable Text to Speech
@@ -44,6 +45,12 @@ EXAMPLE_PAPERS = [
         'id': EXAMPLE_PAPER_5,
         'path': pathlib.Path(__file__).parent / f'example_arxiv_paper_{EXAMPLE_PAPER_5}.html',
         'url': f'https://ar5iv.labs.arxiv.org/html/{EXAMPLE_PAPER_5}',
+    },
+    # Scheduled Sampling for Sequence Prediction with Recurrent Neural Networks
+    {
+        'id': EXAMPLE_PAPER_6,
+        'path': pathlib.Path(__file__).parent / f'example_arxiv_paper_{EXAMPLE_PAPER_6}.html',
+        'url': f'https://ar5iv.labs.arxiv.org/html/{EXAMPLE_PAPER_6}',
     },
 ]
 
@@ -229,6 +236,51 @@ class TestArxivParser:
             all_figures[0].subfigures[0].image_src
             == 'https://ar5iv.labs.arxiv.org/html/1409.0473/assets/rnnsearch.svg'
         )
+
+    def test_parses_figures_nested_in_uncaptioned_figure_separately(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_6)
+        doc_getter = DocumentGetter(document)
+
+        section = doc_getter.get_component_by_path('/sections/S2/S2.SS4')
+
+        assert isinstance(section, doc_models.Section)
+        assert [
+            component.component_id
+            for component in section.components
+            if isinstance(component, doc_models.Figure)
+        ] == ['S2.F1', 'S2.F2']
+
+        figure_1 = doc_getter.get_component_by_path('/sections/S2/S2.SS4/S2.F1')
+
+        assert isinstance(figure_1, doc_models.Figure)
+        assert figure_1.caption.startswith('Figure 1: Illustration of the Scheduled Sampling')
+        assert len(figure_1.subfigures) == 1
+        assert (
+            figure_1.subfigures[0].image_src
+            == 'https://ar5iv.labs.arxiv.org/html/1506.03099/assets/process.png'
+        )
+
+        figure_2 = doc_getter.get_component_by_path('/sections/S2/S2.SS4/S2.F2')
+
+        assert isinstance(figure_2, doc_models.Figure)
+        assert figure_2.caption == 'Figure 2: Examples of decay schedules.'
+        assert len(figure_2.subfigures) == 1
+        assert (
+            figure_2.subfigures[0].image_src
+            == 'https://ar5iv.labs.arxiv.org/html/1506.03099/assets/decay.svg'
+        )
+
+    def test_resolves_references_to_figures_nested_in_uncaptioned_figure(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_6)
+        doc_getter = DocumentGetter(document)
+
+        reference = doc_getter.get_component_by_path('/sections/S2/S2.SS4/S2.SS4.p4.1/5')
+
+        assert isinstance(reference, doc_models.Reference)
+        assert reference.ref_type == 'element'
+        assert reference.target == '/sections/S2/S2.SS4/S2.F2'
 
     def test_parses_correct_equations(self, mock_example_paper):
 
