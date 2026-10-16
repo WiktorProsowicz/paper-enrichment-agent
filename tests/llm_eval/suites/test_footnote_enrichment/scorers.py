@@ -5,7 +5,7 @@ import mlflow
 from mlflow.entities import SpanType, Trace
 from mlflow.entities.assessment import Feedback
 from mlflow.genai import Scorer, scorer
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.prompts import (
     HumanMessagePromptTemplate,
     ChatPromptTemplate,
@@ -113,7 +113,7 @@ def spawn_figure_usefulness_rating(llm: ChatLiteLLM) -> Scorer:
                 footnote_content=enriched_footnote_repr,
             )
         )
-        parsed_response = output_parser.parse(str(model_response.content))
+        parsed_response = _parse_judge_response(model_response, output_parser)
 
         return Feedback(
             value=parsed_response.rating,
@@ -183,7 +183,7 @@ def spawn_text_relevance_rating(llm: ChatLiteLLM) -> Scorer:
                 footnote_content=enriched_footnote_repr,
             )
         )
-        parsed_response = output_parser.parse(str(model_response.content))
+        parsed_response = _parse_judge_response(model_response, output_parser)
 
         return Feedback(
             value=parsed_response.rating,
@@ -249,7 +249,7 @@ def spawn_title_relevance_rating(llm: ChatLiteLLM) -> Scorer:
                 footnote_content=enriched_footnote_repr,
             )
         )
-        parsed_response = output_parser.parse(str(model_response.content))
+        parsed_response = _parse_judge_response(model_response, output_parser)
 
         return Feedback(
             value=parsed_response.rating,
@@ -500,3 +500,25 @@ def _stringify_generated_footnote(footnote: doc_models.Section) -> str:
             str_components.append(f'Equation ({component.format}): {component.expression}')
 
     return '\n\n'.join(str_components)
+
+
+def _parse_judge_response[ResponseModel: pydantic.BaseModel](
+    model_response: BaseMessage, output_parser: PydanticOutputParser[ResponseModel]
+) -> ResponseModel:
+    """Parses the judge's response and attaches its reasoning to the active scorer span.
+
+    For reasoning models, `ChatLiteLLM` returns the content as a list of blocks with the reasoning
+    in a `thinking` block. Only the text blocks are parsed, since the reasoning may contain JSON-like
+    fragments that confuse the output parser.
+    """
+
+    reasoning = '\n\n'.join(
+        block['thinking']
+        for block in model_response.content
+        if isinstance(block, dict) and block.get('type') == 'thinking'
+    )
+
+    if reasoning and (active_span := mlflow.get_current_active_span()):
+        active_span.set_attribute('judge_reasoning', reasoning)
+
+    return output_parser.parse(model_response.text)
