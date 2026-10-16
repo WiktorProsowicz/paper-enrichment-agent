@@ -307,6 +307,36 @@ class TestEnrichmentContext:
 
         assert sample_enrichment_tools.footnote.components == []
 
+    def test_extract_paragraph_citation_error_describes_anchor_mismatch(
+        self, sample_enrichment_tools
+    ):
+
+        with pytest.raises(ValueError) as exc_info:
+            sample_enrichment_tools.extract_paragraph_citation(
+                path_to_paragraph='/sections/section_1/paragraph_1',
+                begin_anchor='These are referenced papers:',
+                end_anchor='and this is all, Thank you.',
+            )
+
+        error_message = str(exc_info.value)
+
+        assert 'Anchor "and this is all, Thank you." not found' in error_message
+        assert 'Only 15/27 characters matched' in error_message
+        assert 'Matched part: "and this is all"' in error_message
+        assert 'Unmatched part: "" before it and ", Thank you." after it' in error_message
+        assert 'closest text in the paragraph is: "and this is all. Thank you."' in error_message
+
+    def test_extract_paragraph_citation_error_on_anchor_with_no_common_text(
+        self, sample_enrichment_tools
+    ):
+
+        with pytest.raises(ValueError, match='no common text was found'):
+            sample_enrichment_tools.extract_paragraph_citation(
+                path_to_paragraph='/sections/section_1/paragraph_1',
+                begin_anchor='These are referenced papers:',
+                end_anchor='###',
+            )
+
     def test_extract_whole_paragraph_raises_on_non_paragraph_path(self, sample_enrichment_tools):
         with pytest.raises(ValueError, match='is not a paragraph'):
             sample_enrichment_tools.extract_whole_paragraph('/sections/section_1/list_1')

@@ -160,6 +160,11 @@ class EnrichmentTools:
         the anchors should be chosen to match the text exactly, including punctuation
         and whitespace.
 
+        The anchors must be copied verbatim from the paragraph content returned by
+        `get_element_content`. Do not render, reformat or rewrite any part of it: keep inline
+        LaTeX exactly as returned (e.g. "$h_{j}$", not "h_j" or "hⱼ"), keep citation markers as
+        returned (e.g. "[2]"), and do not add Markdown formatting (e.g. "**", "_" or backticks).
+
         ## Example
         paragraph content: "The two most commonly used attention functions are additive
             attention [2], and dot-product (multiplicative) attention. Dot-product attention is
@@ -321,15 +326,36 @@ class EnrichmentTools:
             The (start, end) indices of the matched sequence in the paragraph content.
 
         Raises:
-            ValueError: If the anchor is not found in the paragraph content.
+            ValueError: If the anchor is not found in the paragraph content. The error message
+                describes the matched and unmatched parts of the anchor and the closest text found
+                in the paragraph.
         """
 
         match = difflib.SequenceMatcher(None, paragraph_content, anchor).find_longest_match(
             0, len(paragraph_content), 0, len(anchor)
         )
 
-        if match.size == 0 or match.size < self._MIN_ANCHOR_MATCH_RATIO * len(anchor):
-            raise ValueError(f'Anchor "{anchor}" not found in paragraph content.')
+        if match.size == 0:
+            raise ValueError(
+                f'Anchor "{anchor}" not found in paragraph content: no common text was found.'
+            )
+
+        if match.size < self._MIN_ANCHOR_MATCH_RATIO * len(anchor):
+            closest_start = max(0, match.a - match.b)
+            closest_text = paragraph_content[closest_start : closest_start + len(anchor)]
+            unmatched_prefix = anchor[: match.b]
+            unmatched_suffix = anchor[match.b + match.size :]
+
+            raise ValueError(
+                f'Anchor "{anchor}" not found in paragraph content. '
+                f'Only {match.size}/{len(anchor)} characters matched '
+                f'(required: {self._MIN_ANCHOR_MATCH_RATIO:.0%}). '
+                f'Matched part: "{anchor[match.b : match.b + match.size]}". '
+                f'Unmatched part: "{unmatched_prefix}" before it and "{unmatched_suffix}" '
+                'after it. '
+                f'The closest text in the paragraph is: "{closest_text}". '
+                'Copy the anchor exactly from the output of `get_element_content`.'
+            )
 
         return match.a, match.a + match.size
 
