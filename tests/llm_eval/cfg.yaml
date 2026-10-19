@@ -20,4 +20,6 @@ suite_configs:
     thresholds:
       footnote_enrichment:
         figure_usefulness_rating/mean: 4.0
+        text_relevance_rating/mean: 7.0
+        title_relevance_rating/mean: 2.5
         success_rate:extract_paragraph_citation/mean: 0.8
