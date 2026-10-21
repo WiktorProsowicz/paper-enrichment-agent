@@ -501,7 +501,7 @@ class EnrichmentTools:
         if isinstance(component, doc_models.Figure):
             return {
                 **base_repr,
-                'caption': component.caption,
+                'caption': doc_utils.render_caption(component.caption),
             }
 
         return base_repr

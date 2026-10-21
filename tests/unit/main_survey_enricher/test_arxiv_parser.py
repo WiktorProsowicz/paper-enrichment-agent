@@ -1,3 +1,4 @@
+import itertools
 import pathlib
 from unittest.mock import Mock
 
@@ -238,9 +239,12 @@ class TestArxivParser:
         doc_getter = DocumentGetter(document)
 
         all_figures = list(doc_getter.iter_components_of_type(doc_models.Figure))
-        figure_captions = [figure.caption for figure in all_figures]
+        first_caption = all_figures[0].caption
 
-        assert 'Figure 1: The graphical illustration of the proposed model' in figure_captions[0]
+        assert isinstance(first_caption, doc_models.Paragraph)
+        assert first_caption.elements[0].startswith(
+            'Figure 1: The graphical illustration of the proposed model'
+        )
 
         assert len(all_figures[0].subfigures) == 1
         assert (
@@ -281,6 +285,64 @@ class TestArxivParser:
             figure_2.subfigures[0].image_src
             == 'https://ar5iv.labs.arxiv.org/html/1506.03099/assets/decay.svg'
         )
+
+    def test_parses_correct_caption_with_inline_elements(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_4)
+        doc_getter = DocumentGetter(document)
+
+        figure = doc_getter.get_component_by_path('/sections/S4/S4.SS1/S4.F3')
+
+        assert isinstance(figure, doc_models.Figure)
+
+        caption = figure.caption
+
+        assert isinstance(caption, doc_models.Paragraph)
+        assert caption.component_id == 'caption'
+        assert caption.elements[0].startswith('Figure 3: Four sample alignments found by')
+
+        assert isinstance(caption.elements[1], doc_models.MathExpression)
+        assert caption.elements[1].expression == '\\alpha_{ij}'
+        assert caption.elements[2] == ' of the annotation of the '
+
+        references = [e for e in caption.elements if isinstance(e, doc_models.Reference)]
+
+        assert len(references) == 1
+        assert references[0].ref_type == 'element'
+        assert references[0].target == '/sections/S3/S3.SS1/S3.E6'
+
+        assert not any(
+            isinstance(prev, str) and isinstance(curr, str)
+            for prev, curr in itertools.pairwise(caption.elements)
+        )
+
+    def test_parses_correct_subfigure_caption_with_inline_elements(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_2)
+        doc_getter = DocumentGetter(document)
+
+        figure = doc_getter.get_component_by_path('/sections/A5/A5.F4')
+
+        assert isinstance(figure, doc_models.Figure)
+
+        subcaption = figure.subfigures[0].caption
+
+        assert isinstance(subcaption, doc_models.Paragraph)
+        assert subcaption.elements[0] == '(a) '
+        assert isinstance(subcaption.elements[1], doc_models.MathExpression)
+        assert subcaption.elements[1].expression == '\\hat{F_{0}}=F_{0}'
+
+    def test_parses_citations_in_caption(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_7)
+        figure = DocumentGetter(document).get_component_by_path('/sections/Sx2/Sx2.F1')
+
+        assert isinstance(figure, doc_models.Figure)
+        assert isinstance(figure.caption, doc_models.Paragraph)
+
+        citations = [e for e in figure.caption.elements if isinstance(e, doc_models.Reference)]
+
+        assert [(c.ref_type, c.target) for c in citations] == [('citation', 'bib.bibx21')]
 
     def test_resolves_references_to_figures_nested_in_uncaptioned_figure(self, mock_example_paper):
 

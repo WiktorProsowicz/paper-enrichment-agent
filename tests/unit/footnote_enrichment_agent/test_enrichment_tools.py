@@ -85,11 +85,32 @@ def sample_document():
                         components=[
                             doc_models.Figure(
                                 component_id='figure_1',
-                                caption='Sample figure caption.',
+                                caption=doc_models.Paragraph(
+                                    component_id='caption',
+                                    elements=[
+                                        'Sample figure caption with ',
+                                        doc_models.MathExpression(
+                                            expression='f(x)', format='LaTeX'
+                                        ),
+                                        ' as in ',
+                                        doc_models.Reference(
+                                            ref_type='citation', content_text='1', target='bib1'
+                                        ),
+                                        '.',
+                                    ],
+                                ),
                                 subfigures=[
                                     doc_models.ImgSubfigure(
                                         component_id='subfigure_1',
-                                        caption='Sample subfigure caption.',
+                                        caption=doc_models.Paragraph(
+                                            component_id='caption',
+                                            elements=[
+                                                'Sample subfigure caption ',
+                                                doc_models.MathExpression(
+                                                    expression='x > 0', format='LaTeX'
+                                                ),
+                                            ],
+                                        ),
                                         image_src='http://example.com/image1.png',
                                     ),
                                     doc_models.TableSubfigure(
@@ -151,7 +172,7 @@ class TestEnrichmentContext:
                                 {
                                     'type': 'Figure',
                                     'component_path': '/sections/section_1/nested_section/figure_1',
-                                    'caption': 'Sample figure caption.',
+                                    'caption': 'Sample figure caption with $f(x)$ as in [1].',
                                 },
                                 {
                                     'type': 'MathExpression',
@@ -214,9 +235,9 @@ class TestEnrichmentContext:
         path_to_figure = '/sections/section_1/nested_section/figure_1'
 
         expected_details = (
-            'Caption: Sample figure caption.\n'
+            'Caption: Sample figure caption with $f(x)$ as in [1].\n'
             'Subfigures:\n'
-            '\tImgSubfigure (id: subfigure_1): Sample subfigure caption.\n'
+            '\tImgSubfigure (id: subfigure_1): Sample subfigure caption $x > 0$\n'
             '\tTableSubfigure (id: subfigure_2): Sample subfigure caption.'
         )
 
@@ -409,7 +430,8 @@ class TestEnrichmentContext:
 
         assert isinstance(extracted_figure, doc_models.Figure)
 
-        assert extracted_figure.caption == 'Sample figure caption.'
+        assert isinstance(extracted_figure.caption, doc_models.Paragraph)
+        assert extracted_figure.caption.elements[0] == 'Sample figure caption with '
         assert len(extracted_figure.subfigures) == 1
         assert isinstance(extracted_figure.subfigures[0], doc_models.ImgSubfigure)
 
@@ -426,7 +448,8 @@ class TestEnrichmentContext:
 
         assert isinstance(extracted_figure, doc_models.Figure)
 
-        assert extracted_figure.caption == 'Sample figure caption.'
+        assert isinstance(extracted_figure.caption, doc_models.Paragraph)
+        assert extracted_figure.caption.elements[0] == 'Sample figure caption with '
         assert len(extracted_figure.subfigures) == 2
         assert isinstance(extracted_figure.subfigures[0], doc_models.ImgSubfigure)
         assert isinstance(extracted_figure.subfigures[1], doc_models.TableSubfigure)

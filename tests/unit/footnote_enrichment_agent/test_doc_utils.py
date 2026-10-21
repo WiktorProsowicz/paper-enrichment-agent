@@ -107,6 +107,60 @@ class TestDocUtils:
             '\tTableSubfigure (id: subfigure_2): Table caption.'
         )
 
+    def test_render_figure_renders_paragraph_captions(self, sample_paragraph):
+
+        figure = doc_models.Figure(
+            component_id='figure_1',
+            caption=sample_paragraph,
+            subfigures=[
+                doc_models.ImgSubfigure(
+                    component_id='subfigure_1',
+                    caption=doc_models.Paragraph(
+                        elements=[
+                            '(a) ',
+                            doc_models.MathExpression(expression='x > 0', format='LaTeX'),
+                        ]
+                    ),
+                    image_src='http://example.com/image.png',
+                ),
+                doc_models.ImgSubfigure(
+                    component_id='subfigure_2',
+                    caption=None,
+                    image_src='http://example.com/image.png',
+                ),
+            ],
+        )
+
+        assert doc_utils.render_figure(figure) == (
+            f'Caption: {doc_utils.render_paragraph(sample_paragraph)}\n'
+            'Subfigures:\n'
+            '\tImgSubfigure (id: subfigure_1): (a) $x > 0$\n'
+            '\tImgSubfigure (id: subfigure_2): '
+        )
+
+    @pytest.mark.parametrize(
+        ('caption', 'expected_render'),
+        [
+            ('Figure 1: Plain caption.', 'Figure 1: Plain caption.'),
+            (None, ''),
+            (
+                doc_models.Paragraph(
+                    elements=[
+                        'Figure 1: Caption with ',
+                        doc_models.MathExpression(expression='x', format='LaTeX'),
+                        ' and ',
+                        doc_models.Reference(ref_type='citation', content_text='1', target='b1'),
+                        doc_models.Reference(ref_type='citation', content_text='2', target='b2'),
+                    ]
+                ),
+                'Figure 1: Caption with $x$ and [1, 2]',
+            ),
+        ],
+    )
+    def test_render_caption_renders_plain_and_paragraph_captions(self, caption, expected_render):
+
+        assert doc_utils.render_caption(caption) == expected_render
+
     def test_render_equation_includes_format_and_expression(self):
 
         equation = doc_models.MathExpression(expression='a^2 + b^2 = c^2', format='LaTeX')

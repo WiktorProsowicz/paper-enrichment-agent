@@ -465,10 +465,10 @@ def _render_all_figures_from_document(document: doc_models.Document) -> str:
     for figure in doc_getter.iter_components_of_type(doc_models.Figure):
         if isinstance(figure, doc_models.Figure):
             rendered_figures.append(
-                f'Figure: {figure.caption}\n'
+                f'Figure: {doc_utils.render_caption(figure.caption)}\n'
                 + 'Subfigures:\n'
                 + '\n'.join(
-                    f'\t{subfigure.__class__.__name__}: {subfigure.caption}'
+                    f'\t{subfigure.__class__.__name__}: {doc_utils.render_caption(subfigure.caption)}'
                     for subfigure in figure.subfigures
                 )
             )
@@ -497,10 +497,10 @@ def _stringify_generated_footnote(footnote: doc_models.Section, depth: int = 0) 
 
         elif isinstance(component, doc_models.Figure):
             str_components.append(
-                f'Figure: {component.caption}\n'
+                f'Figure: {doc_utils.render_caption(component.caption)}\n'
                 + 'Subfigures:\n'
                 + '\n'.join(
-                    f'\t{subfigure.__class__.__name__}: {subfigure.caption}'
+                    f'\t{subfigure.__class__.__name__}: {doc_utils.render_caption(subfigure.caption)}'
                     for subfigure in component.subfigures
                     if isinstance(subfigure, doc_models.ImgSubfigure)
                 )

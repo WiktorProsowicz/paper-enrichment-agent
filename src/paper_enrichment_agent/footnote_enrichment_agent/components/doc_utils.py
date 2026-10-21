@@ -145,13 +145,33 @@ def render_figure(figure: doc_models.Figure) -> str:
     """
 
     return (
-        f'Caption: {figure.caption}\n'
+        f'Caption: {render_caption(figure.caption)}\n'
         + 'Subfigures:\n'
         + '\n'.join(
-            f'\t{subfigure.__class__.__name__} (id: {subfigure.component_id}): {subfigure.caption}'
+            f'\t{subfigure.__class__.__name__} (id: {subfigure.component_id}): '
+            + render_caption(subfigure.caption)
             for subfigure in figure.subfigures
         )
     )
+
+
+def render_caption(caption: doc_models.FigureCaption | None) -> str:
+    """Renders the textual content of a figure's or a subfigure's caption.
+
+    Captions stored as paragraphs are rendered in the same way as paragraphs (see
+    :func:`render_paragraph`), while plain captions are returned unchanged.
+
+    Args:
+        caption: The caption to be rendered. A missing caption is rendered as an empty string.
+    """
+
+    if caption is None:
+        return ''
+
+    if isinstance(caption, doc_models.Paragraph):
+        return render_paragraph(caption)
+
+    return caption
 
 
 def render_equation(equation: doc_models.MathExpression) -> str:

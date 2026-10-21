@@ -6,6 +6,7 @@ from their html format using the ar5iv.labs.arxiv.org/html/[id] endpoint.
 
 import itertools
 import re
+from collections.abc import Iterator
 from typing import cast
 
 import bs4
@@ -93,7 +94,17 @@ class ArxivParser:
 
         doc_getter = document_manipulators.DocumentGetter(document)
 
-        for reference in doc_getter.iter_components_of_type(doc_models.Reference):
+        # Captions are not part of the document tree, so their references are collected manually
+        caption_references = (
+            element
+            for caption in self._iter_caption_paragraphs(doc_getter)
+            for element in caption.elements
+            if isinstance(element, doc_models.Reference)
+        )
+
+        for reference in itertools.chain(
+            doc_getter.iter_components_of_type(doc_models.Reference), caption_references
+        ):
             if reference.ref_type == 'element':
                 # Both internal and external links are represented as .ltx_ref. Links that do not
                 # reference an element id have to be treated as external links.
@@ -127,7 +138,10 @@ class ArxivParser:
 
         doc_getter = document_manipulators.DocumentGetter(document)
 
-        for paragraph in doc_getter.iter_components_of_type(doc_models.Paragraph):
+        for paragraph in itertools.chain(
+            doc_getter.iter_components_of_type(doc_models.Paragraph),
+            self._iter_caption_paragraphs(doc_getter),
+        ):
             new_elements: list[doc_models.Paragraph.InlineParagraphElement] = []
 
             for is_sequence_of_strings, elements in itertools.groupby(
@@ -139,6 +153,16 @@ class ArxivParser:
                     new_elements.extend(elements)
 
             paragraph.elements = new_elements
+
+    def _iter_caption_paragraphs(
+        self, doc_getter: document_manipulators.DocumentGetter
+    ) -> Iterator[doc_models.Paragraph]:
+        """Yields the captions of figures and subfigures that are stored as paragraphs."""
+
+        for figure in doc_getter.iter_components_of_type(doc_models.Figure):
+            for caption in [figure.caption, *(sf.caption for sf in figure.subfigures)]:
+                if isinstance(caption, doc_models.Paragraph):
+                    yield caption
 
     def _decode_section(self, section_tag: bs4.Tag) -> doc_models.Section:
         """Decodes a section from the arXiv paper.
@@ -268,14 +292,14 @@ class ArxivParser:
         figure = doc_models.Figure(
             component_id=str(figure_tag['id']),
             subfigures=[],
-            caption=self._extract_clean_text(main_caption),
+            caption=self._decode_caption(main_caption),
             description='Figure',
         )
 
         for subfigure_tag in figure_tag.select('.ltx_graphics, table.ltx_tabular'):
             subcaption_tag = subfigure_tag.find_next_sibling(class_='ltx_caption')
 
-            subcaption = self._extract_clean_text(subcaption_tag) if subcaption_tag else None
+            subcaption = self._decode_caption(subcaption_tag) if subcaption_tag else None
 
             if subfigure_tag.name == 'img':
                 figure.subfigures.append(
@@ -305,6 +329,33 @@ class ArxivParser:
                 )
 
         return figure
+
+    def _decode_caption(self, caption_tag: bs4.Tag) -> str | doc_models.Paragraph:
+        """Decodes a caption of a figure or a subfigure.
+
+        A caption with no citations, references, inline math or notes is decoded as plain text.
+        Otherwise it is decoded as a paragraph, preceded by the caption's tag (e.g. "Figure 1:").
+        Only direct children are checked, since those are the only ones decoded in a paragraph.
+        """
+
+        rich_elements_query = (
+            ':scope > .ltx_cite, :scope > .ltx_Math, :scope > a.ltx_ref, :scope > .ltx_note'
+        )
+
+        if not caption_tag.select(rich_elements_query):
+            return self._extract_clean_text(caption_tag)
+
+        caption = self._decode_paragraph(caption_tag)
+        caption.component_id = 'caption'
+        caption.description = 'Caption'
+
+        if caption.elements and isinstance(caption.elements[0], str):
+            caption.elements[0] = caption.elements[0].lstrip()
+
+        if preamble_tag := caption_tag.select_one(':scope > .ltx_tag'):
+            caption.elements.insert(0, f'{self._extract_clean_text(preamble_tag)} ')
+
+        return caption
 
     def _decode_paragraph(self, paragraph_tag: bs4.Tag) -> doc_models.Paragraph:
         """Decodes a paragraph from .ltx_para div.

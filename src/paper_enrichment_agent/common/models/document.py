@@ -66,40 +66,6 @@ class MathExpression(DocumentComponent):
     ]
 
 
-class TableSubfigure(DocumentComponent):
-    """Represents a table in a document."""
-
-    table_contents: Annotated[
-        str,
-        Field(description='The HTML contents of the table.'),
-    ]
-    caption: Annotated[str | None, Field(description='The caption of the table.')]
-
-
-class ImgSubfigure(DocumentComponent):
-    """Represents an image in a document."""
-
-    image_src: Annotated[
-        str,
-        Field(description='The path / href of the image.'),
-    ]
-    caption: Annotated[str | None, Field(description='The caption of the image.')]
-
-
-class Figure(DocumentComponent):
-    """Represents a figure in a document.
-
-    A figure is a distinct component that contains a structured visual representation, such as an
-    image, chart, diagram, table. The figure contains a caption describing its contents. It may
-    contain multiple subfigures, each with its own optional caption.
-    """
-
-    subfigures: list[TableSubfigure | ImgSubfigure] = Field(
-        description='List of subfigures in the figure.'
-    )
-    caption: Annotated[str, Field(description='The caption of the figure.')]
-
-
 class Paragraph(DocumentComponent):
     """Represents a textual paragraph in a document.
 
@@ -113,6 +79,49 @@ class Paragraph(DocumentComponent):
     elements: Annotated[
         list[InlineParagraphElement], Field(description='List of elements in the paragraph.')
     ]
+
+
+# Captions containing citations, references or inline math are kept as paragraphs
+type FigureCaption = str | Paragraph
+
+
+class TableSubfigure(DocumentComponent):
+    """Represents a table in a document."""
+
+    table_contents: Annotated[
+        str,
+        Field(description='The HTML contents of the table.'),
+    ]
+    caption: Annotated[FigureCaption | None, Field(description='The caption of the table.')]
+
+
+class ImgSubfigure(DocumentComponent):
+    """Represents an image in a document."""
+
+    image_src: Annotated[
+        str,
+        Field(description='The path / href of the image.'),
+    ]
+    caption: Annotated[FigureCaption | None, Field(description='The caption of the image.')]
+
+
+class Figure(DocumentComponent):
+    """Represents a figure in a document.
+
+    A figure is a distinct component that contains a structured visual representation, such as an
+    image, chart, diagram, table. The figure contains a caption describing its contents. It may
+    contain multiple subfigures, each with its own optional caption.
+
+    Captions consisting of plain text are stored as strings, while captions containing citations,
+    references or inline math are stored as paragraphs, so that their elements can be rendered.
+    The caption paragraphs are not part of the document tree, i.e. they are not addressable by
+    paths.
+    """
+
+    subfigures: list[TableSubfigure | ImgSubfigure] = Field(
+        description='List of subfigures in the figure.'
+    )
+    caption: Annotated[FigureCaption, Field(description='The caption of the figure.')]
 
 
 class List(DocumentComponent):
