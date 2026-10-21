@@ -28,6 +28,9 @@ from paper_enrichment_agent.footnote_enrichment_agent.components.agent import (
 from paper_enrichment_agent.footnote_enrichment_agent.components.enrichment_context_manager import (
     EnrichmentContextManager,
 )
+from paper_enrichment_agent.footnote_enrichment_agent.components.enrichment_tools import (
+    EnrichmentTools,
+)
 from paper_enrichment_agent.footnote_enrichment_agent.service import (
     FootnoteEnrichmentAgentService,
     Metrics,
@@ -53,6 +56,10 @@ class AppCfg(pydantic.BaseModel):
     agent_cfg: Annotated[
         FootnoteEnrichmentAgent.Configuration,
         Field(description='Configuration of the footnote enrichment agent.'),
+    ]
+    enrichment_tools_cfg: Annotated[
+        EnrichmentTools.Configuration,
+        Field(description='Configuration of the footnote enrichment tools.'),
     ]
     agent_llm_model: Annotated[
         str,
@@ -151,7 +158,7 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
 
     mlflow_setup.setup_mlflow(app_cfg.mlflow_cfg)
 
-    enrichment_context_manager = EnrichmentContextManager()
+    enrichment_context_manager = EnrichmentContextManager(tools_cfg=app_cfg.enrichment_tools_cfg)
 
     enrichment_agent = FootnoteEnrichmentAgent(
         llm=ChatLiteLLM(

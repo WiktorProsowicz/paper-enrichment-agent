@@ -5,100 +5,116 @@ from paper_enrichment_agent.common.models import document as doc_models
 
 
 @pytest.fixture
-def sample_enrichment_tools():
-    return enrichment_tools.EnrichmentTools(
-        doc_models.Document(
-            title='Sample Document',
-            abstract='Sample abstract',
-            description='Sample description',
-            sections=[
-                doc_models.Section(
-                    component_id='section_1',
-                    title='Sample Section',
-                    components=[
-                        doc_models.Paragraph(
-                            component_id='paragraph_1',
-                            elements=[
-                                'This is a formula: ',
-                                doc_models.MathExpression(
-                                    component_id='math_1', expression='E=mc^2', format='LaTeX'
-                                ),
-                                ' and these are referenced papers: ',
-                                doc_models.Reference(
-                                    ref_type='citation', content_text='1', target='bib1'
-                                ),
-                                doc_models.Reference(
-                                    ref_type='citation', content_text='2', target='bib2'
-                                ),
-                                doc_models.Reference(
-                                    ref_type='citation', content_text='3', target='bib3'
-                                ),
-                                ' and this is a link: ',
-                                doc_models.Reference(
-                                    ref_type='link',
-                                    content_text='http://example.com',
-                                    target='http://example.com',
-                                ),
-                                ' and this is a reference to element: ',
-                                doc_models.Reference(
-                                    ref_type='element',
-                                    content_text='Figure 3.1',
-                                    target='/sections/nested_section/figure_1',
-                                ),
-                                ' and this is all. Thank you.',
-                            ],
-                        ),
-                        doc_models.List(
-                            component_id='list_1',
-                            ordered=False,
-                            items=[
-                                doc_models.Paragraph(
-                                    component_id='list_item_1', elements=['List item 1']
-                                ),
-                                doc_models.Paragraph(
-                                    component_id='list_item_2', elements=['List item 2']
-                                ),
-                            ],
-                        ),
-                        doc_models.Section(
-                            component_id='nested_section',
-                            title='Nested Section',
-                            components=[
-                                doc_models.Figure(
-                                    component_id='figure_1',
-                                    caption='Sample figure caption.',
-                                    subfigures=[
-                                        doc_models.ImgSubfigure(
-                                            component_id='subfigure_1',
-                                            caption='Sample subfigure caption.',
-                                            image_src='http://example.com/image1.png',
-                                        ),
-                                        doc_models.TableSubfigure(
-                                            component_id='subfigure_2',
-                                            caption='Sample subfigure caption.',
-                                            table_contents='<table><tr><td>Sample table content</td></tr></table>',
-                                        ),
-                                    ],
-                                ),
-                                doc_models.MathExpression(
-                                    component_id='equation_1',
-                                    expression='a^2 + b^2 = c^2',
-                                    format='LaTeX',
-                                ),
-                            ],
-                        ),
-                    ],
-                )
-            ],
-            footnotes=[
-                doc_models.Paragraph(component_id='footnote_1', elements=['Sample footnote.'])
-            ],
-            referenced_papers=[
-                ('bib1', 'Sample Paper 1'),
-                ('bib2', 'Sample Paper 2'),
-                ('bib3', 'Sample Paper 3'),
-            ],
+def make_enrichment_tools(sample_document):
+
+    def make(drop_sections_from_level=1, min_citation_match_threshold=0.95):
+        return enrichment_tools.EnrichmentTools(
+            sample_document,
+            enrichment_tools.EnrichmentTools.Configuration(
+                drop_sections_from_level=drop_sections_from_level,
+                min_citation_match_threshold=min_citation_match_threshold,
+            ),
         )
+
+    return make
+
+
+@pytest.fixture
+def sample_enrichment_tools(make_enrichment_tools):
+    return make_enrichment_tools()
+
+
+@pytest.fixture
+def sample_document():
+    return doc_models.Document(
+        title='Sample Document',
+        abstract='Sample abstract',
+        description='Sample description',
+        sections=[
+            doc_models.Section(
+                component_id='section_1',
+                title='Sample Section',
+                components=[
+                    doc_models.Paragraph(
+                        component_id='paragraph_1',
+                        elements=[
+                            'This is a formula: ',
+                            doc_models.MathExpression(
+                                component_id='math_1', expression='E=mc^2', format='LaTeX'
+                            ),
+                            ' and these are referenced papers: ',
+                            doc_models.Reference(
+                                ref_type='citation', content_text='1', target='bib1'
+                            ),
+                            doc_models.Reference(
+                                ref_type='citation', content_text='2', target='bib2'
+                            ),
+                            doc_models.Reference(
+                                ref_type='citation', content_text='3', target='bib3'
+                            ),
+                            ' and this is a link: ',
+                            doc_models.Reference(
+                                ref_type='link',
+                                content_text='http://example.com',
+                                target='http://example.com',
+                            ),
+                            ' and this is a reference to element: ',
+                            doc_models.Reference(
+                                ref_type='element',
+                                content_text='Figure 3.1',
+                                target='/sections/nested_section/figure_1',
+                            ),
+                            ' and this is all. Thank you.',
+                        ],
+                    ),
+                    doc_models.List(
+                        component_id='list_1',
+                        ordered=False,
+                        items=[
+                            doc_models.Paragraph(
+                                component_id='list_item_1', elements=['List item 1']
+                            ),
+                            doc_models.Paragraph(
+                                component_id='list_item_2', elements=['List item 2']
+                            ),
+                        ],
+                    ),
+                    doc_models.Section(
+                        component_id='nested_section',
+                        title='Nested Section',
+                        components=[
+                            doc_models.Figure(
+                                component_id='figure_1',
+                                caption='Sample figure caption.',
+                                subfigures=[
+                                    doc_models.ImgSubfigure(
+                                        component_id='subfigure_1',
+                                        caption='Sample subfigure caption.',
+                                        image_src='http://example.com/image1.png',
+                                    ),
+                                    doc_models.TableSubfigure(
+                                        component_id='subfigure_2',
+                                        caption='Sample subfigure caption.',
+                                        table_contents='<table><tr><td>Sample table content</td></tr></table>',
+                                    ),
+                                ],
+                            ),
+                            doc_models.MathExpression(
+                                component_id='equation_1',
+                                expression='a^2 + b^2 = c^2',
+                                format='LaTeX',
+                            ),
+                        ],
+                    ),
+                ],
+            )
+        ],
+        footnotes=[doc_models.Paragraph(component_id='footnote_1', elements=['Sample footnote.'])],
+        referenced_papers=[
+            ('bib1', 'Sample Paper 1'),
+            ('bib2', 'Sample Paper 2'),
+            ('bib3', 'Sample Paper 3'),
+        ],
     )
 
 
@@ -262,18 +278,20 @@ class TestEnrichmentContext:
         assert extracted_paragraph.elements[1] == ' and this is a reference'
 
     def test_extract_paragraph_citation_tolerates_minor_anchor_mismatches(
-        self, sample_enrichment_tools
+        self, make_enrichment_tools
     ):
 
-        sample_enrichment_tools.extract_paragraph_citation(
+        tools = make_enrichment_tools(min_citation_match_threshold=0.95)
+
+        tools.extract_paragraph_citation(
             path_to_paragraph='/sections/section_1/paragraph_1',
             begin_anchor='These are referenced papers:',
             end_anchor='a reference to element: Figure 3.1 and this is all!',
         )
 
-        assert len(sample_enrichment_tools.generate_final_footnote().components) == 1
+        assert len(tools.generate_final_footnote().components) == 1
 
-        extracted_paragraph = sample_enrichment_tools.generate_final_footnote().components[0]
+        extracted_paragraph = tools.generate_final_footnote().components[0]
 
         assert isinstance(extracted_paragraph, doc_models.Paragraph)
 
@@ -295,17 +313,19 @@ class TestEnrichmentContext:
         ],
     )
     def test_extract_paragraph_citation_raises_on_major_anchor_mismatches(
-        self, sample_enrichment_tools, begin_anchor, end_anchor
+        self, make_enrichment_tools, begin_anchor, end_anchor
     ):
 
+        tools = make_enrichment_tools(min_citation_match_threshold=0.95)
+
         with pytest.raises(ValueError, match='not found in paragraph content'):
-            sample_enrichment_tools.extract_paragraph_citation(
+            tools.extract_paragraph_citation(
                 path_to_paragraph='/sections/section_1/paragraph_1',
                 begin_anchor=begin_anchor,
                 end_anchor=end_anchor,
             )
 
-        assert sample_enrichment_tools.generate_final_footnote().components == []
+        assert tools.generate_final_footnote().components == []
 
     def test_extract_paragraph_citation_error_describes_anchor_mismatch(
         self, sample_enrichment_tools
@@ -435,9 +455,7 @@ class TestEnrichmentContext:
 
 
 class TestGenerateFinalFootnote:
-    def test_generate_final_footnote_arranges_components_in_source_document_order(
-        self, sample_enrichment_tools
-    ):
+    def test_arranges_components_in_source_document_order(self, sample_enrichment_tools):
 
         sample_enrichment_tools.extract_equation('/sections/section_1/nested_section/equation_1')
         sample_enrichment_tools.extract_figure(
@@ -460,9 +478,7 @@ class TestGenerateFinalFootnote:
         assert isinstance(components[3], doc_models.MathExpression)
         assert components[4].elements == ['Sample footnote.']
 
-    def test_generate_final_footnote_keeps_extraction_order_for_same_source(
-        self, sample_enrichment_tools
-    ):
+    def test_keeps_extraction_order_for_same_source(self, sample_enrichment_tools):
 
         sample_enrichment_tools.extract_paragraph_citation(
             path_to_paragraph='/sections/section_1/paragraph_1',
@@ -481,3 +497,76 @@ class TestGenerateFinalFootnote:
             ['and this is all. Thank you.'],
             ['This is a formula:'],
         ]
+
+    def _extract_all_kinds_of_components(self, tools):
+
+        tools.extract_equation('/sections/section_1/nested_section/equation_1')
+        tools.extract_whole_paragraph('/footnotes/footnote_1')
+        tools.extract_figure('/sections/section_1/nested_section/figure_1', subfigures_ids=None)
+        tools.extract_whole_paragraph('/sections/section_1/list_1/list_item_2')
+        tools.extract_whole_paragraph('/sections/section_1/paragraph_1')
+
+    def test_groups_dropped_sections_in_kept_ancestor(self, make_enrichment_tools):
+
+        tools = make_enrichment_tools(drop_sections_from_level=2)
+        self._extract_all_kinds_of_components(tools)
+
+        components = tools.generate_final_footnote().components
+
+        assert len(components) == 2
+
+        section, footnote_paragraph = components
+
+        assert isinstance(section, doc_models.Section)
+        assert section.component_id == 'section_1'
+        assert section.title == 'Sample Section'
+        assert [type(c) for c in section.components] == [
+            doc_models.Paragraph,
+            doc_models.Paragraph,
+            doc_models.Figure,
+            doc_models.MathExpression,
+        ]
+        assert section.components[1].elements == ['List item 2']
+
+        assert footnote_paragraph.elements == ['Sample footnote.']
+
+    def test_reproduces_nested_sections(self, make_enrichment_tools):
+
+        tools = make_enrichment_tools(drop_sections_from_level=3)
+        self._extract_all_kinds_of_components(tools)
+
+        components = tools.generate_final_footnote().components
+
+        assert len(components) == 2
+
+        section, footnote_paragraph = components
+
+        assert section.component_id == 'section_1'
+        assert [type(c) for c in section.components] == [
+            doc_models.Paragraph,
+            doc_models.Paragraph,
+            doc_models.Section,
+        ]
+
+        nested_section = section.components[2]
+
+        assert nested_section.component_id == 'nested_section'
+        assert nested_section.title == 'Nested Section'
+        assert [type(c) for c in nested_section.components] == [
+            doc_models.Figure,
+            doc_models.MathExpression,
+        ]
+
+        assert footnote_paragraph.elements == ['Sample footnote.']
+
+    def test_omits_sections_without_extracted_components(self, make_enrichment_tools):
+
+        tools = make_enrichment_tools(drop_sections_from_level=3)
+        tools.extract_equation('/sections/section_1/nested_section/equation_1')
+
+        section = tools.generate_final_footnote().components[0]
+
+        assert section.component_id == 'section_1'
+        assert len(section.components) == 1
+        assert section.components[0].component_id == 'nested_section'
+        assert isinstance(section.components[0].components[0], doc_models.MathExpression)

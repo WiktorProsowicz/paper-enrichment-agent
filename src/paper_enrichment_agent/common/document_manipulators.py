@@ -61,15 +61,23 @@ class DocumentGetter:
     ) -> Iterator[T]:
         """Returns all components of the specified type from the document."""
 
+        for _, component in self.iter_components_with_paths():
+            if isinstance(component, component_type):
+                yield component
+
+    def iter_components_with_paths(self) -> Iterator[tuple[str, doc_models.DocumentComponent]]:
+        """Returns all components of the document together with their paths.
+
+        The components are yielded in the pre-order of the document tree, starting with the
+        primary sections of the document and followed by its footnotes. Therefore, the order of
+        the yielded components reflects the order in which they appear in the document.
+        """
+
         for section in self._document.sections:
-            for _, component in _iter_component(section, root_path='/sections'):
-                if isinstance(component, component_type):
-                    yield component
+            yield from _iter_component(section, root_path='/sections')
 
         for footnote in self._document.footnotes:
-            for _, component in _iter_component(footnote, root_path='/footnotes'):
-                if isinstance(component, component_type):
-                    yield component
+            yield from _iter_component(footnote, root_path='/footnotes')
 
     def get_components_on_path(self, target_path: str) -> list[doc_models.DocumentComponent]:
         """Returns all components on the specified path in the document.

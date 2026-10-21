@@ -191,6 +191,35 @@ class TestDocumentGetter:
         lists = list(getter.iter_components_of_type(doc_models.List))
         assert len(lists) == 1
 
+    def test_iter_components_with_paths_yields_all_components_in_document_order(
+        self, sample_document, expected_paths
+    ):
+        getter = DocumentGetter(sample_document)
+
+        components_with_paths = list(getter.iter_components_with_paths())
+
+        assert [path for path, _ in components_with_paths] == [
+            '/sections/section_1',
+            '/sections/section_1/paragraph_1',
+            '/sections/section_1/paragraph_1/ref_1',
+            '/sections/section_1/figure_1',
+            '/sections/section_1/figure_1/img_subfig_1',
+            '/sections/section_1/figure_1/table_subfig_1',
+            '/sections/section_2',
+            '/sections/section_2/paragraph_2',
+            '/sections/section_2/math_expr_1',
+            '/sections/section_2/math_expr_2',
+            '/sections/section_2/list_1',
+            '/sections/section_2/list_1/list_item_1',
+            '/sections/section_2/list_1/list_item_2',
+            '/footnotes/footnote_1',
+            '/footnotes/footnote_2',
+            '/footnotes/footnote_2/math_expr',
+        ]
+
+        for path, component in expected_paths:
+            assert (path, component) in components_with_paths
+
     def test_get_component_by_path(self, sample_document, expected_paths):
         getter = DocumentGetter(sample_document)
 

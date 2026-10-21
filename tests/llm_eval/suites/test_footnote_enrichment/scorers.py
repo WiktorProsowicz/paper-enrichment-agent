@@ -476,13 +476,23 @@ def _render_all_figures_from_document(document: doc_models.Document) -> str:
     return '\n\n'.join(rendered_figures)
 
 
-def _stringify_generated_footnote(footnote: doc_models.Section) -> str:
-    """Converts the generated footnote into a string representation."""
+def _stringify_generated_footnote(footnote: doc_models.Section, depth: int = 0) -> str:
+    """Converts the generated footnote into a string representation.
+
+    The sections nested in the footnote are rendered recursively, with their titles as Markdown
+    headings reflecting their depth in the footnote.
+    """
 
     str_components: list[str] = []
 
     for component in footnote.components:
-        if isinstance(component, doc_models.Paragraph):
+        if isinstance(component, doc_models.Section):
+            str_components.append(
+                f'{"#" * (depth + 1)} {component.title}\n\n'
+                + _stringify_generated_footnote(component, depth + 1)
+            )
+
+        elif isinstance(component, doc_models.Paragraph):
             str_components.append(doc_utils.render_paragraph(component))
 
         elif isinstance(component, doc_models.Figure):

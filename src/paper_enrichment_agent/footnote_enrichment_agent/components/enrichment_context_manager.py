@@ -31,8 +31,9 @@ class EnrichmentContextManager:
     class EnrichmentContextManagerError(Exception):
         """Base class for exceptions raised by the `EnrichmentContextManager`."""
 
-    def __init__(self) -> None:
+    def __init__(self, tools_cfg: EnrichmentTools.Configuration) -> None:
 
+        self._tools_cfg = tools_cfg
         self._tools_states: dict[str, EnrichmentTools] = {}
         self._mcp_endpoints: dict[str, Starlette] = {}
 
@@ -89,7 +90,7 @@ class EnrichmentContextManager:
                 )
 
         else:
-            self._tools_states[session_id] = EnrichmentTools(reference_document)
+            self._tools_states[session_id] = EnrichmentTools(reference_document, self._tools_cfg)
 
         tools_state = self._tools_states[session_id]
 

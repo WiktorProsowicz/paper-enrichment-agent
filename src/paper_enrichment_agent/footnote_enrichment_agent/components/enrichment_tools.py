@@ -6,6 +6,10 @@ Exported classes:
 
 import difflib
 import itertools
+from typing import Annotated
+
+import pydantic
+from pydantic import Field
 
 from paper_enrichment_agent.common import document_manipulators
 from paper_enrichment_agent.common.models import document as doc_models
@@ -21,10 +25,12 @@ class EnrichmentTools:
     2. The state of the built footnote, modified by the enrichment agent.
 
     The extraction tools do not modify the footnote directly. Instead, they record the extracted
-    components together with the ids of the reference document components they come from. The
-    footnote is composed on demand, with the extracted components arranged according to the order
-    of their source components in the reference document, regardless of the order in which they
-    were extracted.
+    components together with the paths of the reference document components they come from. The
+    footnote is composed on demand, regardless of the order in which the components were
+    extracted: the extracted components are placed in sections mirroring the sections of their
+    source components and arranged according to the order of the source components in the
+    reference document. The depth of the reproduced section hierarchy is limited by the
+    configuration.
 
     The agent using the enrichment tools is by design not expected to know the full structure of
     the document, down to the furthest leaf in the tree. This applies especially to paragraphs,
@@ -34,47 +40,95 @@ class EnrichmentTools:
 
     type DocumentTree = str | list[DocumentTree] | dict[str, DocumentTree]
 
-    # The minimal fraction of a citation anchor that has to be matched in the paragraph content for
-    # the anchor to be located.
-    _MIN_ANCHOR_MATCH_RATIO = 0.95
+    class Configuration(pydantic.BaseModel):
+        """Contains the configuration of the enrichment tools."""
+
+        drop_sections_from_level: Annotated[
+            int,
+            Field(
+                description=(
+                    'The level of the reference document sections from which the sections are '
+                    'not reproduced in the generated footnote. The top-level sections have level '
+                    '1. The components extracted from the dropped sections are grouped together '
+                    'in their closest reproduced ancestor section. Level 1 results in a flat '
+                    'footnote without any sections.'
+                ),
+                ge=1,
+            ),
+        ]
+        min_citation_match_threshold: Annotated[
+            float,
+            Field(
+                description=(
+                    'The minimal fraction of a citation anchor that has to be matched in the '
+                    'paragraph content for the anchor to be located.'
+                ),
+                gt=0,
+                le=1,
+            ),
+        ]
 
     # The types of components whose content can be read with `get_element_content`. The remaining
     # types only group other components and are navigated through the tree of contents.
     _READABLE_COMPONENT_TYPES = (doc_models.Paragraph, doc_models.Figure, doc_models.MathExpression)
 
-    def __init__(self, reference_document: doc_models.Document) -> None:
+    def __init__(self, reference_document: doc_models.Document, cfg: 'Configuration') -> None:
 
         self._document = reference_document
+        self._cfg = cfg
         self._doc_getter = document_manipulators.DocumentGetter(self._document)
         self._footnote_title = ''
-        self._extracted_components: list[doc_models.Section.SectionComponent] = []
 
-        # Maps the ids of the extracted components to the ids of their source components in the
-        # reference document.
-        self._source_ids: dict[str, str] = {}
+        # The extracted components paired with the paths of their source components in the
+        # reference document, in the order of extraction.
+        self._extracted_components: list[tuple[doc_models.Section.SectionComponent, str]] = []
 
     def generate_final_footnote(self) -> doc_models.Section:
         """Returns the footnote composed from the current state of the enrichment.
 
-        The footnote is composed from the components extracted so far, arranged according to the
-        order of their source components in the reference document. Components extracted from the
-        same source component keep the order in which they were extracted.
+        Each extracted component is placed in a section of the footnote mirroring the most
+        detailed section of its source component, as long as that section's level is below
+        `drop_sections_from_level`. Otherwise, the component is placed in the closest ancestor
+        section within that limit, or directly in the footnote if there is none. The reproduced
+        sections keep the ids and titles of their source sections.
+
+        The extracted components are ordered by the positions of their source components in the
+        reference document. Components extracted from the same source component keep the order in
+        which they were extracted.
         """
 
-        source_order: dict[str, int] = {}
+        positions: dict[str, int] = {}
+        source_components: dict[str, doc_models.DocumentComponent] = {}
 
-        for position, component in enumerate(
-            self._doc_getter.iter_components_of_type(doc_models.DocumentComponent)
-        ):
-            source_order.setdefault(component.component_id, position)
+        for position, (path, component) in enumerate(self._doc_getter.iter_components_with_paths()):
+            positions[path] = position
+            source_components[path] = component
 
-        return doc_models.Section(
-            title=self._footnote_title,
-            components=sorted(
-                self._extracted_components,
-                key=lambda c: source_order[self._source_ids[c.component_id]],
-            ),
+        sorted_components = sorted(
+            self._extracted_components, key=lambda extracted: positions[extracted[1]]
         )
+
+        footnote = doc_models.Section(title=self._footnote_title, components=[])
+        generated_sections: dict[str, doc_models.Section] = {}
+
+        for component, source_path in sorted_components:
+            parent = footnote
+            kept_sections = self._get_kept_source_sections(source_path, source_components)
+
+            for section_path, source_section in kept_sections:
+                if section_path not in generated_sections:
+                    generated_sections[section_path] = doc_models.Section(
+                        component_id=source_section.component_id,
+                        title=source_section.title,
+                        components=[],
+                    )
+                    parent.components.append(generated_sections[section_path])
+
+                parent = generated_sections[section_path]
+
+            parent.components.append(component)
+
+        return footnote
 
     def get_document_tree(self) -> DocumentTree:
         """Returns a tree representation of the reference document.
@@ -242,7 +296,7 @@ class EnrichmentTools:
             else:
                 citation_paragraph.elements.extend(elements)
 
-        self._add_extracted_component(citation_paragraph, paragraph.component_id)
+        self._extracted_components.append((citation_paragraph, path_to_paragraph))
 
     def extract_whole_paragraph(self, path_to_paragraph: str) -> None:
         """Extracts the entire paragraph from the reference document and moves it to the footnote.
@@ -258,8 +312,8 @@ class EnrichmentTools:
 
         paragraph = self._obtain_paragraph(path_to_paragraph)
 
-        self._add_extracted_component(
-            doc_models.Paragraph(elements=list(paragraph.elements)), paragraph.component_id
+        self._extracted_components.append(
+            (doc_models.Paragraph(elements=list(paragraph.elements)), path_to_paragraph)
         )
 
     def extract_figure(self, path_to_figure: str, subfigures_ids: list[str] | None = None) -> None:
@@ -306,7 +360,7 @@ class EnrichmentTools:
             component_id=figure.component_id,
         )
 
-        self._add_extracted_component(extracted_figure, figure.component_id)
+        self._extracted_components.append((extracted_figure, path_to_figure))
 
     def extract_equation(self, path_to_equation: str) -> None:
         """Extracts an equation from the reference document and adds it to the footnote.
@@ -327,22 +381,36 @@ class EnrichmentTools:
         if not isinstance(equation, doc_models.MathExpression):
             raise ValueError(f'Component at path {path_to_equation} is not a math expression.')
 
-        self._add_extracted_component(
-            doc_models.MathExpression(
-                expression=equation.expression,
-                format=equation.format,
-                component_id=equation.component_id,
-            ),
-            equation.component_id,
+        self._extracted_components.append(
+            (
+                doc_models.MathExpression(
+                    expression=equation.expression,
+                    format=equation.format,
+                    component_id=equation.component_id,
+                ),
+                path_to_equation,
+            )
         )
 
-    def _add_extracted_component(
-        self, component: doc_models.Section.SectionComponent, source_component_id: str
-    ) -> None:
-        """Records a component extracted into the footnote together with its source id."""
+    def _get_kept_source_sections(
+        self, source_path: str, source_components: dict[str, doc_models.DocumentComponent]
+    ) -> list[tuple[str, doc_models.Section]]:
+        """Returns the ancestor sections of a source component that are kept in the footnote.
 
-        self._extracted_components.append(component)
-        self._source_ids[component.component_id] = source_component_id
+        The sections are returned together with their paths, from the top-level section down to
+        the most detailed one below `drop_sections_from_level`.
+        """
+
+        path_parts = source_path.split('/')
+        ancestor_paths = ['/'.join(path_parts[:end]) for end in range(3, len(path_parts))]
+
+        ancestor_sections = [
+            (path, component)
+            for path in ancestor_paths
+            if isinstance(component := source_components[path], doc_models.Section)
+        ]
+
+        return ancestor_sections[: self._cfg.drop_sections_from_level - 1]
 
     def _obtain_paragraph(self, path_to_paragraph: str) -> doc_models.Paragraph:
         """Locates and validates a paragraph in the reference document."""
@@ -359,8 +427,8 @@ class EnrichmentTools:
 
         The anchor is located by the longest sequence it shares with the paragraph content. The
         sequence is accepted even if it does not cover the entire anchor, as long as its length is
-        at least `_MIN_ANCHOR_MATCH_RATIO` of the anchor's length, so that minor mistakes in the
-        anchor do not prevent locating it.
+        at least `min_citation_match_threshold` of the anchor's length, so that minor mistakes in
+        the anchor do not prevent locating it.
 
         Returns:
             The (start, end) indices of the matched sequence in the paragraph content.
@@ -380,7 +448,7 @@ class EnrichmentTools:
                 f'Anchor "{anchor}" not found in paragraph content: no common text was found.'
             )
 
-        if match.size < self._MIN_ANCHOR_MATCH_RATIO * len(anchor):
+        if match.size < self._cfg.min_citation_match_threshold * len(anchor):
             closest_start = max(0, match.a - match.b)
             closest_text = paragraph_content[closest_start : closest_start + len(anchor)]
             unmatched_prefix = anchor[: match.b]
@@ -389,7 +457,7 @@ class EnrichmentTools:
             raise ValueError(
                 f'Anchor "{anchor}" not found in paragraph content. '
                 f'Only {match.size}/{len(anchor)} characters matched '
-                f'(required: {self._MIN_ANCHOR_MATCH_RATIO:.0%}). '
+                f'(required: {self._cfg.min_citation_match_threshold:.0%}). '
                 f'Matched part: "{anchor[match.b : match.b + match.size]}". '
                 f'Unmatched part: "{unmatched_prefix}" before it and "{unmatched_suffix}" '
                 'after it. '

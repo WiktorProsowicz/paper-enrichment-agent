@@ -11,6 +11,10 @@ agent_cfg:
   mcp_server_url_base: http://localhost:8081/mcp
   agent_recursion_limit: 50
 
+enrichment_tools_cfg:
+  drop_sections_from_level: 3
+  min_citation_match_threshold: 0.95
+
 agent_llm_model: ''
 
 agent_llm_params:
