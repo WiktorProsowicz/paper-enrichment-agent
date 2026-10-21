@@ -1,0 +1,507 @@
+"""Utilities for managing the state of the footnote enrichment tools.
+
+Exported classes:
+    EnrichmentTools: Represents the state of a single footnote-enrichment session.
+"""
+
+import difflib
+import itertools
+from typing import Annotated
+
+import pydantic
+from pydantic import Field
+
+from paper_enrichment_agent.common import document_manipulators
+from paper_enrichment_agent.common.models import document as doc_models
+from paper_enrichment_agent.footnote_enrichment_agent.components import doc_utils
+
+
+class EnrichmentTools:
+    """Represents the state of the footnote-enrichment tools.
+
+    The state represents two main components:
+    1. The context built from the reference document, which is used to provide content for footnote
+    enrichment.
+    2. The state of the built footnote, modified by the enrichment agent.
+
+    The extraction tools do not modify the footnote directly. Instead, they record the extracted
+    components together with the paths of the reference document components they come from. The
+    footnote is composed on demand, regardless of the order in which the components were
+    extracted: the extracted components are placed in sections mirroring the sections of their
+    source components and arranged according to the order of the source components in the
+    reference document. The depth of the reproduced section hierarchy is limited by the
+    configuration.
+
+    The agent using the enrichment tools is by design not expected to know the full structure of
+    the document, down to the furthest leaf in the tree. This applies especially to paragraphs,
+    which typically contain multiple elements and should be therefore rendered as continuous text.
+
+    """
+
+    type DocumentTree = str | list[DocumentTree] | dict[str, DocumentTree]
+
+    class Configuration(pydantic.BaseModel):
+        """Contains the configuration of the enrichment tools."""
+
+        drop_sections_from_level: Annotated[
+            int,
+            Field(
+                description=(
+                    'The level of the reference document sections from which the sections are '
+                    'not reproduced in the generated footnote. The top-level sections have level '
+                    '1. The components extracted from the dropped sections are grouped together '
+                    'in their closest reproduced ancestor section. Level 1 results in a flat '
+                    'footnote without any sections.'
+                ),
+                ge=1,
+            ),
+        ]
+        min_citation_match_threshold: Annotated[
+            float,
+            Field(
+                description=(
+                    'The minimal fraction of a citation anchor that has to be matched in the '
+                    'paragraph content for the anchor to be located.'
+                ),
+                gt=0,
+                le=1,
+            ),
+        ]
+
+    # The types of components whose content can be read with `get_element_content`. The remaining
+    # types only group other components and are navigated through the tree of contents.
+    _READABLE_COMPONENT_TYPES = (doc_models.Paragraph, doc_models.Figure, doc_models.MathExpression)
+
+    def __init__(self, reference_document: doc_models.Document, cfg: 'Configuration') -> None:
+
+        self._document = reference_document
+        self._cfg = cfg
+        self._doc_getter = document_manipulators.DocumentGetter(self._document)
+        self._footnote_title = ''
+
+        # The extracted components paired with the paths of their source components in the
+        # reference document, in the order of extraction.
+        self._extracted_components: list[tuple[doc_models.Section.SectionComponent, str]] = []
+
+    def generate_final_footnote(self) -> doc_models.Section:
+        """Returns the footnote composed from the current state of the enrichment.
+
+        Each extracted component is placed in a section of the footnote mirroring the most
+        detailed section of its source component, as long as that section's level is below
+        `drop_sections_from_level`. Otherwise, the component is placed in the closest ancestor
+        section within that limit, or directly in the footnote if there is none. The reproduced
+        sections keep the ids and titles of their source sections.
+
+        The extracted components are ordered by the positions of their source components in the
+        reference document. Components extracted from the same source component keep the order in
+        which they were extracted.
+        """
+
+        positions: dict[str, int] = {}
+        source_components: dict[str, doc_models.DocumentComponent] = {}
+
+        for position, (path, component) in enumerate(self._doc_getter.iter_components_with_paths()):
+            positions[path] = position
+            source_components[path] = component
+
+        sorted_components = sorted(
+            self._extracted_components, key=lambda extracted: positions[extracted[1]]
+        )
+
+        footnote = doc_models.Section(title=self._footnote_title, components=[])
+        generated_sections: dict[str, doc_models.Section] = {}
+
+        for component, source_path in sorted_components:
+            parent = footnote
+            kept_sections = self._get_kept_source_sections(source_path, source_components)
+
+            for section_path, source_section in kept_sections:
+                if section_path not in generated_sections:
+                    generated_sections[section_path] = doc_models.Section(
+                        component_id=source_section.component_id,
+                        title=source_section.title,
+                        components=[],
+                    )
+                    parent.components.append(generated_sections[section_path])
+
+                parent = generated_sections[section_path]
+
+            parent.components.append(component)
+
+        return footnote
+
+    def get_document_tree(self) -> DocumentTree:
+        """Returns a tree representation of the reference document.
+
+        The tree representation is a nested structure that captures the hierarchy of sections,
+        paragraphs, and other components in the document. It makes it possible to determine the id
+        of an arbitrary component and a path to it.
+        """
+        return {
+            'sections': [
+                self._convert_component_to_tree('/sections', section)
+                for section in self._document.sections
+            ],
+            'footnotes': [
+                self._convert_component_to_tree('/footnotes', footnote)
+                for footnote in self._document.footnotes
+            ],
+        }
+
+    def set_footnote_title(self, title: str) -> None:
+        """Sets the title of the footnote being enriched.
+
+        The title should be set once after the content of the footnote is established and should
+        reflect the role of the footnote in explaining the reference document.
+
+        ## Example
+        survey title: Attention Is All You Need
+        citation context: The two most commonly used attention functions are additive attention
+            [2], and dot-product (multiplicative) attention.
+        reference title: Neural machine translation by jointly learning to align and translate.
+        good footnote title: Description of additive attention mechanism
+
+        Args:
+            title: The title to be set.
+        """
+        self._footnote_title = title
+
+    def get_element_content(self, path_to_element: str) -> str:
+        """Returns the content of an element in the reference document.
+
+        Use this tool to read an element before deciding whether to extract it into the footnote.
+        Only the following element types can be read: Paragraph, Figure and MathExpression. Other
+        elements, such as Section or List, only group other elements, so use the tree of contents to
+        find the paths of the elements they contain and read those instead.
+
+        The content returned for each element type:
+        - Paragraph: the textual content of the paragraph, composed from its elements, such as
+            references, links, text fragments etc. The content is rendered the way a human would
+            see it on paper, i.e. with no markup or formatting metadata, except for inline math,
+            which is kept as its source enclosed in "$" signs. Therefore, if the text refers to an
+            element, e.g. a figure, its placement should be inferred from the context, e.g. "as
+            shown in Figure 3.2" suggests the figure should be placed in the subsection 2 of the
+            section 3.
+        - Figure: the caption of the figure and the list of its subfigures. Each subfigure is
+            listed together with its id, which can be used to extract only the chosen subfigures
+            of the figure.
+        - MathExpression: the format and the source of a standalone equation.
+
+        ## Example output (Paragraph)
+        The two most commonly used attention functions are additive attention [2], and dot-product
+        (multiplicative) attention. Dot-product attention is identical to our algorithm, except for
+        the scaling factor of $1 / sqrt(d)$.
+
+        ## Example output (Figure)
+        Caption: A diagram illustrating the architecture of the Transformer model.
+        Subfigures:
+            ImgSubfigure (id: subfigure_1): A schematic representation of the multi-head attention
+                mechanism.
+            TableSubfigure (id: subfigure_2): A table showing the hyperparameters used in the
+                Transformer model.
+            ...
+
+        ## Example output (MathExpression)
+        Format: LaTeX
+        Expression: \\mathrm{Attention}(Q, K, V) = \\mathrm{softmax}(QK^T / \\sqrt{d_k}) V
+
+        Args:
+            path_to_element: The path to the element in the reference document.
+        """
+
+        element = self._doc_getter.get_component_by_path(path_to_element)
+
+        if not isinstance(element, self._READABLE_COMPONENT_TYPES):
+            readable_types = ', '.join(t.__name__ for t in self._READABLE_COMPONENT_TYPES)
+
+            raise ValueError(
+                f'Component at path {path_to_element} is a {element.__class__.__name__}, whose '
+                f'content cannot be read. Readable element types: {readable_types}. Use the tree '
+                'of contents to find the paths of the readable elements it contains.'
+            )
+
+        if isinstance(element, doc_models.Paragraph):
+            return doc_utils.render_paragraph(element)
+
+        if isinstance(element, doc_models.Figure):
+            return doc_utils.render_figure(element)
+
+        return doc_utils.render_equation(element)
+
+    def extract_paragraph_citation(
+        self, path_to_paragraph: str, begin_anchor: str, end_anchor: str
+    ) -> None:
+        """Extracts the citation from a given paragraph and moves it to the footnote.
+
+        The citation is identified by the provided begin and end text anchors that help
+        unambiguously locate the desired fragment within the paragraph. The extracted citation is
+        added to the enriched footnote. Citations help provide necessary explanation of the
+        referenced document, yet they reduce the amount of content that has to be read to
+        understand the described content.
+
+        Both the begin and end anchors should ideally span several words to avoid ambiguity. Also,
+        the anchors should be chosen to match the text exactly, including punctuation
+        and whitespace.
+
+        The anchors must be copied verbatim from the paragraph content returned by
+        `get_element_content`. Do not render, reformat or rewrite any part of it: keep inline
+        LaTeX exactly as returned (e.g. "$h_{j}$", not "h_j" or "hⱼ"), keep citation markers as
+        returned (e.g. "[2]"), and do not add Markdown formatting (e.g. "**", "_" or backticks).
+
+        ## Example
+        paragraph content: "The two most commonly used attention functions are additive
+            attention [2], and dot-product (multiplicative) attention. Dot-product attention is
+            identical to our algorithm, except for the scaling factor of $1 / sqrt(d)$. Additive
+            attention computes the compatibility function using a feed-forward network with a
+            single hidden layer."
+        begin anchor: "Dot-product attention is"
+        end anchor: "scaling factor of $1 / sqrt(d)$."
+        returned citation: "Dot-product attention is identical to our algorithm, except for the
+            scaling factor of $1 / sqrt(d)$."
+
+        Args:
+            path_to_paragraph: The path to the paragraph in the reference document.
+            begin_anchor: The beginning text anchor of the citation to be extracted.
+            end_anchor: The ending text anchor of the citation to be extracted.
+        """
+
+        paragraph = self._obtain_paragraph(path_to_paragraph)
+        str_elements = doc_utils.stringify_paragraph_elements(paragraph)
+        paragraph_content = ''.join(e.str_content for e in str_elements)
+
+        citation_begin, _ = self._locate_anchor(paragraph_content, begin_anchor)
+        _, citation_end = self._locate_anchor(paragraph_content, end_anchor)
+
+        citation_elements: list[doc_models.Paragraph.InlineParagraphElement] = []
+
+        for start_idx, end_idx, element in doc_utils.iter_str_elements_boundaries(str_elements):
+            if citation_begin >= end_idx or citation_end <= start_idx:
+                continue
+
+            if element.doc_component is not None:
+                citation_elements.append(element.doc_component)
+                continue
+
+            citation_elements.append(
+                element.str_content[max(0, citation_begin - start_idx) : citation_end - start_idx]
+            )
+
+        citation_paragraph = doc_models.Paragraph(elements=[])
+
+        for is_string_sequence, elements in itertools.groupby(
+            citation_elements, key=lambda e: isinstance(e, str)
+        ):
+            if is_string_sequence:
+                citation_paragraph.elements.append(''.join(elements))  # type: ignore[arg-type]
+            else:
+                citation_paragraph.elements.extend(elements)
+
+        self._extracted_components.append((citation_paragraph, path_to_paragraph))
+
+    def extract_whole_paragraph(self, path_to_paragraph: str) -> None:
+        """Extracts the entire paragraph from the reference document and moves it to the footnote.
+
+        The whole content of the paragraph is added to the enriched footnote, as if it was cited
+        from its very beginning to its very end. This should be preferred over citing a fragment of
+        the paragraph if the entire paragraph is relevant to the concepts the footnote aims to
+        explain.
+
+        Args:
+            path_to_paragraph: The path to the paragraph in the reference document.
+        """
+
+        paragraph = self._obtain_paragraph(path_to_paragraph)
+
+        self._extracted_components.append(
+            (doc_models.Paragraph(elements=list(paragraph.elements)), path_to_paragraph)
+        )
+
+    def extract_figure(self, path_to_figure: str, subfigures_ids: list[str] | None = None) -> None:
+        """Extracts a figure from the reference document and adds it to the footnote.
+
+        The extracted figure is added to the enriched footnote. Figures provide visual explanation
+        of the concepts described in the reference document. They should be included in the enriched
+        footnote especially if they are somehow referenced in the textual content that has been
+        previously extracted from the reference document or are strictly relevant to the concepts
+        the footnote aims to explain.
+
+        Args:
+            path_to_figure: The path to the figure in the reference document.
+            subfigures_ids: The list of subfigure ids to be extracted. If None, all subfigures are
+                extracted.
+        """
+
+        figure = self._doc_getter.get_component_by_path(path_to_figure)
+
+        if not isinstance(figure, doc_models.Figure):
+            raise ValueError(f'Component at path {path_to_figure} is not a figure.')
+
+        if subfigures_ids is not None:
+            existing_subfigures_ids = {subfigure.component_id for subfigure in figure.subfigures}
+            invalid_ids = set(subfigures_ids) - existing_subfigures_ids
+
+            if invalid_ids:
+                raise ValueError(
+                    f'Some subfigure ids do not exist in the figure: {invalid_ids}. '
+                    f'Existing subfigure ids: {existing_subfigures_ids}.'
+                )
+
+            subfigures = [
+                subfigure
+                for subfigure in figure.subfigures
+                if subfigure.component_id in subfigures_ids
+            ]
+        else:
+            subfigures = figure.subfigures
+
+        extracted_figure = doc_models.Figure(
+            caption=figure.caption,
+            subfigures=subfigures,
+            component_id=figure.component_id,
+        )
+
+        self._extracted_components.append((extracted_figure, path_to_figure))
+
+    def extract_equation(self, path_to_equation: str) -> None:
+        """Extracts an equation from the reference document and adds it to the footnote.
+
+        Equations are MathExpression components that are direct components of a section, i.e. they
+        are standalone (displayed) formulas rather than mathematical expressions embedded within a
+        paragraph's text. Inline expressions should be extracted together with the surrounding text
+        of the paragraph instead. Equations should be included in the enriched footnote if they are
+        referenced in the previously extracted textual content or are strictly relevant to the
+        concepts the footnote aims to explain.
+
+        Args:
+            path_to_equation: The path to the equation in the reference document.
+        """
+
+        equation = self._doc_getter.get_component_by_path(path_to_equation)
+
+        if not isinstance(equation, doc_models.MathExpression):
+            raise ValueError(f'Component at path {path_to_equation} is not a math expression.')
+
+        self._extracted_components.append(
+            (
+                doc_models.MathExpression(
+                    expression=equation.expression,
+                    format=equation.format,
+                    component_id=equation.component_id,
+                ),
+                path_to_equation,
+            )
+        )
+
+    def _get_kept_source_sections(
+        self, source_path: str, source_components: dict[str, doc_models.DocumentComponent]
+    ) -> list[tuple[str, doc_models.Section]]:
+        """Returns the ancestor sections of a source component that are kept in the footnote.
+
+        The sections are returned together with their paths, from the top-level section down to
+        the most detailed one below `drop_sections_from_level`.
+        """
+
+        path_parts = source_path.split('/')
+        ancestor_paths = ['/'.join(path_parts[:end]) for end in range(3, len(path_parts))]
+
+        ancestor_sections = [
+            (path, component)
+            for path in ancestor_paths
+            if isinstance(component := source_components[path], doc_models.Section)
+        ]
+
+        return ancestor_sections[: self._cfg.drop_sections_from_level - 1]
+
+    def _obtain_paragraph(self, path_to_paragraph: str) -> doc_models.Paragraph:
+        """Locates and validates a paragraph in the reference document."""
+
+        paragraph = self._doc_getter.get_component_by_path(path_to_paragraph)
+
+        if not isinstance(paragraph, doc_models.Paragraph):
+            raise ValueError(f'Component at path {path_to_paragraph} is not a paragraph.')
+
+        return paragraph
+
+    def _locate_anchor(self, paragraph_content: str, anchor: str) -> tuple[int, int]:
+        """Locates a text anchor in the paragraph content.
+
+        The anchor is located by the longest sequence it shares with the paragraph content. The
+        sequence is accepted even if it does not cover the entire anchor, as long as its length is
+        at least `min_citation_match_threshold` of the anchor's length, so that minor mistakes in
+        the anchor do not prevent locating it.
+
+        Returns:
+            The (start, end) indices of the matched sequence in the paragraph content.
+
+        Raises:
+            ValueError: If the anchor is not found in the paragraph content. The error message
+                describes the matched and unmatched parts of the anchor and the closest text found
+                in the paragraph.
+        """
+
+        match = difflib.SequenceMatcher(None, paragraph_content, anchor).find_longest_match(
+            0, len(paragraph_content), 0, len(anchor)
+        )
+
+        if match.size == 0:
+            raise ValueError(
+                f'Anchor "{anchor}" not found in paragraph content: no common text was found.'
+            )
+
+        if match.size < self._cfg.min_citation_match_threshold * len(anchor):
+            closest_start = max(0, match.a - match.b)
+            closest_text = paragraph_content[closest_start : closest_start + len(anchor)]
+            unmatched_prefix = anchor[: match.b]
+            unmatched_suffix = anchor[match.b + match.size :]
+
+            raise ValueError(
+                f'Anchor "{anchor}" not found in paragraph content. '
+                f'Only {match.size}/{len(anchor)} characters matched '
+                f'(required: {self._cfg.min_citation_match_threshold:.0%}). '
+                f'Matched part: "{anchor[match.b : match.b + match.size]}". '
+                f'Unmatched part: "{unmatched_prefix}" before it and "{unmatched_suffix}" '
+                'after it. '
+                f'The closest text in the paragraph is: "{closest_text}". '
+                'Copy the anchor exactly from the output of `get_element_content`.'
+            )
+
+        return match.a, match.a + match.size
+
+    def _convert_component_to_tree(
+        self, root_path: str, component: doc_models.DocumentComponent
+    ) -> DocumentTree:
+        """Converts a document component to its tree representation."""
+
+        component_path = f'{root_path}/{component.component_id}'
+
+        base_repr: dict[str, EnrichmentTools.DocumentTree] = {
+            'type': component.__class__.__name__,
+            'component_path': component_path,
+        }
+
+        if isinstance(component, doc_models.Section):
+            return {
+                **base_repr,
+                'title': component.title,
+                'components': [
+                    self._convert_component_to_tree(component_path, comp)
+                    for comp in component.components
+                ],
+            }
+
+        if isinstance(component, doc_models.List):
+            return {
+                **base_repr,
+                'items': [
+                    self._convert_component_to_tree(component_path, item)
+                    for item in component.items
+                ],
+            }
+
+        if isinstance(component, doc_models.Figure):
+            return {
+                **base_repr,
+                'caption': doc_utils.render_caption(component.caption),
+            }
+
+        return base_repr

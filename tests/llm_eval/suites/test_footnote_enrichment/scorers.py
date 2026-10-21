@@ -1,0 +1,534 @@
+import pathlib
+import re
+
+import mlflow
+from mlflow.entities import SpanType, Trace
+from mlflow.entities.assessment import Feedback
+from mlflow.genai import Scorer, scorer
+from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.prompts import (
+    HumanMessagePromptTemplate,
+    ChatPromptTemplate,
+)
+from langchain_core.output_parsers.pydantic import PydanticOutputParser
+from langchain_litellm import ChatLiteLLM
+import pydantic
+
+
+from paper_enrichment_agent.common.models import document as doc_models
+from paper_enrichment_agent.common.models import misc as misc_models
+from paper_enrichment_agent.common import document_manipulators
+from paper_enrichment_agent.footnote_enrichment_agent.components import doc_utils
+
+from llm_eval import core as harness_core
+
+
+AGENT_INVOCATION_SPAN_NAME = 'FootnoteEnrichmentAgent::invoke'
+CALL_TOOL_SPAN_PATTERN = re.compile(r'^call_tool\b')
+AGENT_REASONING_SPAN_NAME = 'agent_reasoning'
+AGENT_ACTION_SPAN_NAME = 'agent_action'
+
+
+class FigureUsefulnessResponseModel(pydantic.BaseModel):
+    """Response model for the FigureUsefulnessRating LLM Judge."""
+
+    rating: int = pydantic.Field(ge=1, le=5)
+    rationale: str
+
+
+class TextRelevanceResponseModel(pydantic.BaseModel):
+    """Response model for the TextRelevanceRating LLM Judge."""
+
+    rating: int = pydantic.Field(ge=1, le=10)
+    rationale: str
+
+
+class TitleRelevanceResponseModel(pydantic.BaseModel):
+    """Response model for the TitleRelevanceRating LLM Judge."""
+
+    rating: int = pydantic.Field(ge=1, le=3)
+    rationale: str
+
+
+_PROMPT_TEMPLATES_DIR = pathlib.Path(__file__).parent / 'llm_judge_prompts'
+
+
+def spawn_figure_usefulness_rating(llm: ChatLiteLLM) -> Scorer:
+    """Dynamically creates the FigureUsefulnessRating LLM Judge."""
+
+    with open(_PROMPT_TEMPLATES_DIR.joinpath('figure_usefulness_rating_system_prompt.md')) as f:
+        system_prompt = f.read()
+
+    message_template = ChatPromptTemplate.from_messages(
+        [
+            SystemMessage(content=system_prompt),
+            HumanMessagePromptTemplate.from_template_file(
+                _PROMPT_TEMPLATES_DIR.joinpath('figure_usefulness_rating_user_prompt.md'),
+                input_variables=[
+                    'base_article_title',
+                    'base_article_abstract',
+                    'citing_paragraph_fragment',
+                    'citing_paragraph_additional_context',
+                    'cited_article_title',
+                    'cited_article_abstract',
+                    'cited_article_figures',
+                    'footnote_content',
+                ],
+            ),
+        ]
+    )
+
+    output_parser = PydanticOutputParser(pydantic_object=FigureUsefulnessResponseModel)
+
+    @harness_core.scorer_with_typed_args()
+    @mlflow.trace(name='figure_usefulness_rating', span_type=SpanType.EVALUATOR)
+    def figure_usefulness_rating(trace: Trace, outputs: doc_models.Section) -> Feedback | None:
+        """Assigns the FigureUsefulnessRating to the enriched footnote.
+
+        FigureUsefulnessRating is a discrete integer score on scale (1-5) that indicates how
+        adequately the enriched footnote uses figures from the referenced document to support
+        the survey's claims.
+        """
+
+        enrichment_request, citing_paragraph_fragment = _get_request_and_citation_fragment(trace)
+
+        cited_article_figures = _render_all_figures_from_document(
+            enrichment_request.reference_document
+        )
+
+        if not cited_article_figures.strip():
+            return None
+
+        enriched_footnote_repr = _stringify_generated_footnote(outputs)
+
+        model_response = llm.invoke(
+            message_template.format_messages(
+                base_article_title=enrichment_request.survey_title,
+                base_article_abstract=enrichment_request.survey_abstract,
+                citing_paragraph_fragment=citing_paragraph_fragment,
+                citing_paragraph_additional_context=enrichment_request.citation_context_info,
+                cited_article_title=enrichment_request.reference_document.title,
+                cited_article_abstract=enrichment_request.reference_document.abstract,
+                cited_article_figures=cited_article_figures,
+                footnote_content=enriched_footnote_repr,
+            )
+        )
+        parsed_response = _parse_judge_response(model_response, output_parser)
+
+        return Feedback(
+            value=parsed_response.rating,
+            rationale=parsed_response.rationale,
+        )
+
+    return figure_usefulness_rating
+
+
+def spawn_text_relevance_rating(llm: ChatLiteLLM) -> Scorer:
+    """Dynamically creates the TextRelevanceRating LLM Judge."""
+
+    with open(_PROMPT_TEMPLATES_DIR.joinpath('text_relevance_rating_system_prompt.md')) as f:
+        system_prompt = f.read()
+
+    message_template = ChatPromptTemplate.from_messages(
+        [
+            SystemMessage(content=system_prompt),
+            HumanMessagePromptTemplate.from_template_file(
+                _PROMPT_TEMPLATES_DIR.joinpath('text_relevance_rating_user_prompt.md'),
+                input_variables=[
+                    'base_article_title',
+                    'base_article_abstract',
+                    'citing_paragraph_fragment',
+                    'citing_paragraph_additional_context',
+                    'cited_article_title',
+                    'cited_article_abstract',
+                    'revealed_paragraphs',
+                    'footnote_content',
+                ],
+            ),
+        ]
+    )
+
+    output_parser = PydanticOutputParser(pydantic_object=TextRelevanceResponseModel)
+
+    @harness_core.scorer_with_typed_args()
+    @mlflow.trace(name='text_relevance_rating', span_type=SpanType.EVALUATOR)
+    def text_relevance_rating(trace: Trace, outputs: doc_models.Section) -> Feedback:
+        """Assigns the TextRelevanceRating to the enriched footnote.
+
+        TextRelevanceRating is a discrete integer score on scale (1-10) that indicates whether the
+        text extracted into the enriched footnote is relevant to the context of the citation and
+        fully describes the parts of the referenced document the citation relies on.
+        """
+
+        enrichment_request, citing_paragraph_fragment = _get_request_and_citation_fragment(trace)
+
+        revealed_paragraphs = _render_revealed_paragraphs(
+            trace, enrichment_request.reference_document
+        )
+
+        if not revealed_paragraphs.strip():
+            revealed_paragraphs = '(The agent did not reveal any paragraphs.)'
+
+        enriched_footnote_repr = _stringify_generated_footnote(outputs)
+
+        model_response = llm.invoke(
+            message_template.format_messages(
+                base_article_title=enrichment_request.survey_title,
+                base_article_abstract=enrichment_request.survey_abstract,
+                citing_paragraph_fragment=citing_paragraph_fragment,
+                citing_paragraph_additional_context=enrichment_request.citation_context_info,
+                cited_article_title=enrichment_request.reference_document.title,
+                cited_article_abstract=enrichment_request.reference_document.abstract,
+                revealed_paragraphs=revealed_paragraphs,
+                footnote_content=enriched_footnote_repr,
+            )
+        )
+        parsed_response = _parse_judge_response(model_response, output_parser)
+
+        return Feedback(
+            value=parsed_response.rating,
+            rationale=parsed_response.rationale,
+        )
+
+    return text_relevance_rating
+
+
+def spawn_title_relevance_rating(llm: ChatLiteLLM) -> Scorer:
+    """Dynamically creates the TitleRelevanceRating LLM Judge."""
+
+    with open(_PROMPT_TEMPLATES_DIR.joinpath('title_relevance_rating_system_prompt.md')) as f:
+        system_prompt = f.read()
+
+    message_template = ChatPromptTemplate.from_messages(
+        [
+            SystemMessage(content=system_prompt),
+            HumanMessagePromptTemplate.from_template_file(
+                _PROMPT_TEMPLATES_DIR.joinpath('title_relevance_rating_user_prompt.md'),
+                input_variables=[
+                    'base_article_title',
+                    'base_article_abstract',
+                    'citing_paragraph_fragment',
+                    'citing_paragraph_additional_context',
+                    'cited_article_title',
+                    'cited_article_abstract',
+                    'footnote_title',
+                    'footnote_content',
+                ],
+            ),
+        ]
+    )
+
+    output_parser = PydanticOutputParser(pydantic_object=TitleRelevanceResponseModel)
+
+    @harness_core.scorer_with_typed_args()
+    @mlflow.trace(name='title_relevance_rating', span_type=SpanType.EVALUATOR)
+    def title_relevance_rating(trace: Trace, outputs: doc_models.Section) -> Feedback:
+        """Assigns the TitleRelevanceRating to the enriched footnote.
+
+        TitleRelevanceRating is a discrete integer score on scale (1-3) that indicates how well the
+        title of the enriched footnote names its content and corresponds to the context of the
+        citation.
+        """
+
+        if not outputs.title.strip():
+            return Feedback(value=1, rationale='The agent did not set a title for the footnote.')
+
+        enrichment_request, citing_paragraph_fragment = _get_request_and_citation_fragment(trace)
+
+        enriched_footnote_repr = _stringify_generated_footnote(outputs)
+
+        model_response = llm.invoke(
+            message_template.format_messages(
+                base_article_title=enrichment_request.survey_title,
+                base_article_abstract=enrichment_request.survey_abstract,
+                citing_paragraph_fragment=citing_paragraph_fragment,
+                citing_paragraph_additional_context=enrichment_request.citation_context_info,
+                cited_article_title=enrichment_request.reference_document.title,
+                cited_article_abstract=enrichment_request.reference_document.abstract,
+                footnote_title=outputs.title,
+                footnote_content=enriched_footnote_repr,
+            )
+        )
+        parsed_response = _parse_judge_response(model_response, output_parser)
+
+        return Feedback(
+            value=parsed_response.rating,
+            rationale=parsed_response.rationale,
+        )
+
+    return title_relevance_rating
+
+
+@scorer
+def paragraphs_extracted_before_revealing(trace: Trace) -> Feedback:
+    """Counts the number of paragraphs extracted into footnote before revealing their contents."""
+
+    extraction_spans = [
+        span
+        for span in trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
+        if span.attributes['tool_name'] in ('extract_paragraph_citation', 'extract_whole_paragraph')
+    ]
+
+    reveal_spans = [
+        span
+        for span in trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
+        if span.attributes['tool_name'] == 'get_element_content'
+    ]
+
+    return Feedback(
+        value=sum(
+            1
+            for extraction_span in extraction_spans
+            if not any(
+                reveal_span.start_time_ns < extraction_span.start_time_ns
+                for reveal_span in reveal_spans
+                if (
+                    extraction_span.inputs['path_to_paragraph']
+                    == reveal_span.inputs['path_to_element']
+                )
+            )
+        )
+    )
+
+
+@scorer
+def figures_extracted_before_revealing(trace: Trace) -> Feedback:
+    """Counts the number of figures extracted into footnote before revealing their contents."""
+
+    extraction_spans = [
+        span
+        for span in trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
+        if span.attributes['tool_name'] == 'extract_figure'
+    ]
+
+    reveal_spans = [
+        span
+        for span in trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
+        if span.attributes['tool_name'] == 'get_element_content'
+    ]
+
+    return Feedback(
+        value=sum(
+            1
+            for extraction_span in extraction_spans
+            if not any(
+                reveal_span.start_time_ns < extraction_span.start_time_ns
+                for reveal_span in reveal_spans
+                if (
+                    extraction_span.inputs['path_to_figure']
+                    == reveal_span.inputs['path_to_element']
+                )
+            )
+        )
+    )
+
+
+@harness_core.scorer_with_typed_args()
+def agent_execution_stats_metrics(outputs: doc_models.Section, trace: Trace) -> list[Feedback]:
+    """Computes general metrics about the agent's execution."""
+
+    call_tool_spans = trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
+    reason_spans = trace.search_spans(name=AGENT_REASONING_SPAN_NAME)
+    action_spans = trace.search_spans(name=AGENT_ACTION_SPAN_NAME)
+
+    enrichment_request = misc_models.FootnoteEnrichmentRequest(
+        **trace.search_spans(name=AGENT_INVOCATION_SPAN_NAME)[0].inputs['request']
+    )
+
+    reference_doc_getter = document_manipulators.DocumentGetter(
+        enrichment_request.reference_document
+    )
+
+    return [
+        Feedback(name='call_tool_count', value=len(call_tool_spans)),
+        Feedback(name='agent_reasoning_count', value=len(reason_spans)),
+        Feedback(name='agent_action_count', value=len(action_spans)),
+        Feedback(
+            name='n_figures_in_reference_doc',
+            value=sum(1 for _ in reference_doc_getter.iter_components_of_type(doc_models.Figure)),
+        ),
+        Feedback(
+            name='n_paragraphs_in_reference_doc',
+            value=sum(
+                1 for _ in reference_doc_getter.iter_components_of_type(doc_models.Paragraph)
+            ),
+        ),
+        Feedback(
+            name='generated_footnote_rendered_size',
+            value=len(_stringify_generated_footnote(outputs)),
+        ),
+    ]
+
+
+def spawn_specific_tool_usage_metrics(tool_name: str) -> Scorer:
+    """Spawns a metric for tracking the usage of a specific tool."""
+
+    def specific_tool_usage_metrics(trace: Trace) -> list[Feedback]:
+        """Measures the call count and the success rate for a specific tool.
+
+        The success rate is not reported if the tool was not called, so that the run is not
+        scored on (and validated against) a behaviour that did not occur.
+        """
+        call_tool_spans = [
+            span
+            for span in trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
+            if span.attributes['tool_name'] == tool_name
+        ]
+
+        successful_tool_calls = [
+            span for span in call_tool_spans if not span.attributes['tool_is_error']
+        ]
+
+        call_count_feedback = Feedback(name=f'call_count:{tool_name}', value=len(call_tool_spans))
+
+        if not call_tool_spans:
+            return [call_count_feedback]
+
+        return [
+            call_count_feedback,
+            Feedback(
+                name=f'success_rate:{tool_name}',
+                value=len(successful_tool_calls) / len(call_tool_spans),
+            ),
+        ]
+
+    return scorer(specific_tool_usage_metrics)
+
+
+def _get_request_and_citation_fragment(
+    trace: Trace,
+) -> tuple[misc_models.FootnoteEnrichmentRequest, str]:
+    """Recovers the enrichment request from the trace and the fragment citing the document."""
+
+    enrichment_request = misc_models.FootnoteEnrichmentRequest(
+        **trace.search_spans(name=AGENT_INVOCATION_SPAN_NAME)[0].inputs['request']
+    )
+
+    citation_reference = next(
+        element
+        for element in enrichment_request.referencing_paragraph.elements
+        if isinstance(element, doc_models.Reference)
+        and element.component_id == enrichment_request.reference_id
+    )
+
+    citing_paragraph_fragment = doc_utils.get_context_of_citation_in_paragraph(
+        enrichment_request.referencing_paragraph,
+        citation_reference,
+        n_context_chars=500,
+    )
+
+    return enrichment_request, citing_paragraph_fragment
+
+
+def _render_revealed_paragraphs(trace: Trace, reference_document: doc_models.Document) -> str:
+    """Renders the paragraphs whose contents were successfully revealed to the agent.
+
+    The paragraphs are re-rendered from the reference document the same way the
+    `get_element_content` tool does, ordered by their first reveal. Revealed figures and
+    equations are skipped.
+    """
+
+    reveal_spans = sorted(
+        (
+            span
+            for span in trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
+            if span.attributes['tool_name'] == 'get_element_content'
+            and not span.attributes['tool_is_error']
+        ),
+        key=lambda span: span.start_time_ns,
+    )
+
+    revealed_paths = list(dict.fromkeys(span.inputs['path_to_element'] for span in reveal_spans))
+
+    doc_getter = document_manipulators.DocumentGetter(reference_document)
+
+    rendered_paragraphs: list[str] = []
+
+    for path in revealed_paths:
+        paragraph = doc_getter.get_component_by_path(path)
+
+        if isinstance(paragraph, doc_models.Paragraph):
+            rendered_paragraphs.append(
+                f'Paragraph (path: {path}):\n' + doc_utils.render_paragraph(paragraph)
+            )
+
+    return '\n\n'.join(rendered_paragraphs)
+
+
+def _render_all_figures_from_document(document: doc_models.Document) -> str:
+    """Renders the figures from the document into a string representation."""
+
+    doc_getter = document_manipulators.DocumentGetter(document)
+
+    rendered_figures: list[str] = []
+
+    for figure in doc_getter.iter_components_of_type(doc_models.Figure):
+        if isinstance(figure, doc_models.Figure):
+            rendered_figures.append(
+                f'Figure: {doc_utils.render_caption(figure.caption)}\n'
+                + 'Subfigures:\n'
+                + '\n'.join(
+                    f'\t{subfigure.__class__.__name__}: {doc_utils.render_caption(subfigure.caption)}'
+                    for subfigure in figure.subfigures
+                )
+            )
+
+    return '\n\n'.join(rendered_figures)
+
+
+def _stringify_generated_footnote(footnote: doc_models.Section, depth: int = 0) -> str:
+    """Converts the generated footnote into a string representation.
+
+    The sections nested in the footnote are rendered recursively, with their titles as Markdown
+    headings reflecting their depth in the footnote.
+    """
+
+    str_components: list[str] = []
+
+    for component in footnote.components:
+        if isinstance(component, doc_models.Section):
+            str_components.append(
+                f'{"#" * (depth + 1)} {component.title}\n\n'
+                + _stringify_generated_footnote(component, depth + 1)
+            )
+
+        elif isinstance(component, doc_models.Paragraph):
+            str_components.append(doc_utils.render_paragraph(component))
+
+        elif isinstance(component, doc_models.Figure):
+            str_components.append(
+                f'Figure: {doc_utils.render_caption(component.caption)}\n'
+                + 'Subfigures:\n'
+                + '\n'.join(
+                    f'\t{subfigure.__class__.__name__}: {doc_utils.render_caption(subfigure.caption)}'
+                    for subfigure in component.subfigures
+                    if isinstance(subfigure, doc_models.ImgSubfigure)
+                )
+            )
+
+        elif isinstance(component, doc_models.MathExpression):
+            str_components.append(f'Equation ({component.format}): {component.expression}')
+
+    return '\n\n'.join(str_components)
+
+
+def _parse_judge_response[ResponseModel: pydantic.BaseModel](
+    model_response: BaseMessage, output_parser: PydanticOutputParser[ResponseModel]
+) -> ResponseModel:
+    """Parses the judge's response and attaches its reasoning to the active scorer span.
+
+    For reasoning models, `ChatLiteLLM` returns the content as a list of blocks with the reasoning
+    in a `thinking` block. Only the text blocks are parsed, since the reasoning may contain JSON-like
+    fragments that confuse the output parser.
+    """
+
+    reasoning = '\n\n'.join(
+        block['thinking']
+        for block in model_response.content
+        if isinstance(block, dict) and block.get('type') == 'thinking'
+    )
+
+    if reasoning and (active_span := mlflow.get_current_active_span()):
+        active_span.set_attribute('judge_reasoning', reasoning)
+
+    return output_parser.parse(model_response.text)

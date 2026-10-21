@@ -1,0 +1,25 @@
+import pydantic
+
+from paper_enrichment_agent.common.models import document as doc_models
+
+
+class FootnoteEnrichmentDSInputs(pydantic.BaseModel):
+    """Used by the footnote enrichment agent to generate the footnote.
+
+    See :class:`FootnoteEnrichmentRequest` for more details.
+    """
+
+    survey_arxiv_id: str
+    cited_document_arxiv_id: str
+    citing_paragraph_path: str
+    reference_id: str
+    citation_context: str
+
+
+class CalibrationDSExpectations(pydantic.BaseModel):
+    """Expected ratings for LLM Judges calibration."""
+
+    footnote: doc_models.Section
+    figure_usefulness_rating: int
+    text_relevance_rating: int
+    title_fitness_rating: int

@@ -1,0 +1,25 @@
+---
+mlflow_tracking_uri: http://mlflow:5000
+test_case_exec_timeout: 1800
+active_suites: [test_footnote_enrichment]
+
+judge_llm_config:
+  model_name: ''
+  api_key: ''
+  model_params:
+    temperature: 0.3
+    request_timeout: 600
+
+suite_configs:
+  test_footnote_enrichment:
+    footnote_enrichment_service_url: http://footnote-enrichment-agent:8081
+
+    datasets:
+      footnote_enrichment: footnote_enrichment_ds/v1
+
+    thresholds:
+      footnote_enrichment:
+        figure_usefulness_rating/mean: 4.0
+        text_relevance_rating/mean: 7.0
+        title_relevance_rating/mean: 2.5
+        success_rate:extract_paragraph_citation/mean: 0.8

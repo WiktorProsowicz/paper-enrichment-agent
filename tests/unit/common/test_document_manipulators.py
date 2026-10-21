@@ -7,7 +7,7 @@ from paper_enrichment_agent.common.models import document as doc_models
 @pytest.fixture(scope='session')
 def sample_document():
     return doc_models.Document(
-        component_id='doc_1',
+        title='Sample Document',
         description='Sample document for testing.',
         abstract='Document abstract.',
         sections=[
@@ -191,6 +191,35 @@ class TestDocumentGetter:
         lists = list(getter.iter_components_of_type(doc_models.List))
         assert len(lists) == 1
 
+    def test_iter_components_with_paths_yields_all_components_in_document_order(
+        self, sample_document, expected_paths
+    ):
+        getter = DocumentGetter(sample_document)
+
+        components_with_paths = list(getter.iter_components_with_paths())
+
+        assert [path for path, _ in components_with_paths] == [
+            '/sections/section_1',
+            '/sections/section_1/paragraph_1',
+            '/sections/section_1/paragraph_1/ref_1',
+            '/sections/section_1/figure_1',
+            '/sections/section_1/figure_1/img_subfig_1',
+            '/sections/section_1/figure_1/table_subfig_1',
+            '/sections/section_2',
+            '/sections/section_2/paragraph_2',
+            '/sections/section_2/math_expr_1',
+            '/sections/section_2/math_expr_2',
+            '/sections/section_2/list_1',
+            '/sections/section_2/list_1/list_item_1',
+            '/sections/section_2/list_1/list_item_2',
+            '/footnotes/footnote_1',
+            '/footnotes/footnote_2',
+            '/footnotes/footnote_2/math_expr',
+        ]
+
+        for path, component in expected_paths:
+            assert (path, component) in components_with_paths
+
     def test_get_component_by_path(self, sample_document, expected_paths):
         getter = DocumentGetter(sample_document)
 
@@ -202,6 +231,22 @@ class TestDocumentGetter:
 
         with pytest.raises(ValueError):
             getter.get_component_by_path('/non_existent/path')
+
+    def test_get_components_on_path(self, sample_document, expected_paths):
+        getter = DocumentGetter(sample_document)
+
+        components = getter.get_components_on_path('/sections/section_2/list_1/list_item_2')
+
+        assert len(components) == 3
+        assert isinstance(components[0], doc_models.Section)
+        assert isinstance(components[1], doc_models.List)
+        assert isinstance(components[2], doc_models.Paragraph)
+
+        components = getter.get_components_on_path('/footnotes/footnote_2/math_expr')
+
+        assert len(components) == 2
+        assert isinstance(components[0], doc_models.Section)
+        assert isinstance(components[1], doc_models.MathExpression)
 
 
 class TestDocumentSetter:

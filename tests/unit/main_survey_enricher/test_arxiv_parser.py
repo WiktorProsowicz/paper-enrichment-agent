@@ -1,3 +1,4 @@
+import itertools
 import pathlib
 from unittest.mock import Mock
 
@@ -11,6 +12,10 @@ from paper_enrichment_agent.main_survey_enricher.components.arxiv_parser import 
 EXAMPLE_PAPER_1 = '1905.09263'
 EXAMPLE_PAPER_2 = '2006.04558'
 EXAMPLE_PAPER_3 = '1706.03762'
+EXAMPLE_PAPER_4 = '1409.0473'
+EXAMPLE_PAPER_5 = '1905.06791'
+EXAMPLE_PAPER_6 = '1506.03099'
+EXAMPLE_PAPER_7 = '1902.10245'
 
 EXAMPLE_PAPERS = [
     # FastSpeech: Fast, Robust and Controllable Text to Speech
@@ -30,6 +35,30 @@ EXAMPLE_PAPERS = [
         'id': EXAMPLE_PAPER_3,
         'path': pathlib.Path(__file__).parent / f'example_arxiv_paper_{EXAMPLE_PAPER_3}.html',
         'url': f'https://ar5iv.labs.arxiv.org/html/{EXAMPLE_PAPER_3}',
+    },
+    # Neural Machine Translation by Jointly Learning to Align and Translate
+    {
+        'id': EXAMPLE_PAPER_4,
+        'path': pathlib.Path(__file__).parent / f'example_arxiv_paper_{EXAMPLE_PAPER_4}.html',
+        'url': f'https://ar5iv.labs.arxiv.org/html/{EXAMPLE_PAPER_4}',
+    },
+    # Almost Unsupervised Text to Speech and Automatic Speech Recognition
+    {
+        'id': EXAMPLE_PAPER_5,
+        'path': pathlib.Path(__file__).parent / f'example_arxiv_paper_{EXAMPLE_PAPER_5}.html',
+        'url': f'https://ar5iv.labs.arxiv.org/html/{EXAMPLE_PAPER_5}',
+    },
+    # Scheduled Sampling for Sequence Prediction with Recurrent Neural Networks
+    {
+        'id': EXAMPLE_PAPER_6,
+        'path': pathlib.Path(__file__).parent / f'example_arxiv_paper_{EXAMPLE_PAPER_6}.html',
+        'url': f'https://ar5iv.labs.arxiv.org/html/{EXAMPLE_PAPER_6}',
+    },
+    # Non-Autoregressive Machine Translation with Auxiliary Regularization
+    {
+        'id': EXAMPLE_PAPER_7,
+        'path': pathlib.Path(__file__).parent / f'example_arxiv_paper_{EXAMPLE_PAPER_7}.html',
+        'url': f'https://ar5iv.labs.arxiv.org/html/{EXAMPLE_PAPER_7}',
     },
 ]
 
@@ -61,13 +90,59 @@ class TestArxivParser:
         with pytest.raises(ArxivParser.ParsingError):
             parser.parse('nonexistent_paper_id')
 
-    def test_parses_correct_abstract(self, mock_example_paper):
+    @pytest.mark.parametrize(
+        'paper_id, expected_title',
+        [
+            (
+                EXAMPLE_PAPER_1,
+                'FastSpeech: Fast, Robust and Controllable Text to Speech',
+            ),
+            (
+                EXAMPLE_PAPER_2,
+                'FastSpeech 2: Fast and High-Quality End-to-End Text to Speech',
+            ),
+            (
+                EXAMPLE_PAPER_3,
+                'Attention Is All You Need',
+            ),
+            (
+                EXAMPLE_PAPER_4,
+                'Neural Machine Translation by Jointly Learning to Align and Translate',
+            ),
+            (
+                EXAMPLE_PAPER_7,
+                'Non-Autoregressive Machine Translation with Auxiliary Regularization',
+            ),
+        ],
+    )
+    def test_parses_correct_title(self, mock_example_paper, paper_id, expected_title):
+        parser = ArxivParser()
+        document = parser.parse(paper_id)
+
+        assert document.title == expected_title
+
+    @pytest.mark.parametrize(
+        'paper_id, begin_anchor, end_anchor',
+        [
+            (
+                EXAMPLE_PAPER_1,
+                'Neural network based end-to-end text to speech (TTS)',
+                'Synthesized speech samples can be found in https://speechresearch.github.io/fastspeech/.',
+            ),
+            (
+                EXAMPLE_PAPER_4,
+                'Neural machine translation is a recently proposed',
+                'the model agree well with our intuition.',
+            ),
+        ],
+    )
+    def test_parses_correct_abstract(self, mock_example_paper, paper_id, begin_anchor, end_anchor):
 
         parser = ArxivParser()
-        document = parser.parse('1905.09263')
+        document = parser.parse(paper_id)
 
-        assert document.abstract.startswith('Neural network based end-to-end text to speech (TTS)')
-        assert document.abstract.endswith('Therefore, we call our model FastSpeech.')
+        assert document.abstract.startswith(begin_anchor)
+        assert document.abstract.endswith(end_anchor)
 
     def test_parses_correct_sections(self, mock_example_paper):
 
@@ -129,7 +204,7 @@ class TestArxivParser:
         assert 'FastSpeech 2' in second_figure_subfigures[1].table_contents
         second_figure_subfigures[1].caption == '(b) CMOS comparison.'
 
-    def test_parses_correct_figures(self, mock_example_paper):
+    def test_parses_correct_img_figures(self, mock_example_paper):
 
         parser = ArxivParser()
         document = parser.parse(EXAMPLE_PAPER_1)
@@ -155,6 +230,130 @@ class TestArxivParser:
             == 'https://ar5iv.labs.arxiv.org/html/1905.09263/assets/x4.png'
         )
         assert first_figure_subfigures[3].caption == '(d) Duration Predictor'
+
+    def test_parses_correct_svg_figures(self, mock_example_paper):
+
+        parser = ArxivParser()
+        document = parser.parse(EXAMPLE_PAPER_4)
+
+        doc_getter = DocumentGetter(document)
+
+        all_figures = list(doc_getter.iter_components_of_type(doc_models.Figure))
+        first_caption = all_figures[0].caption
+
+        assert isinstance(first_caption, doc_models.Paragraph)
+        assert first_caption.elements[0].startswith(
+            'Figure 1: The graphical illustration of the proposed model'
+        )
+
+        assert len(all_figures[0].subfigures) == 1
+        assert (
+            all_figures[0].subfigures[0].image_src
+            == 'https://ar5iv.labs.arxiv.org/html/1409.0473/assets/rnnsearch.svg'
+        )
+
+    def test_parses_figures_nested_in_uncaptioned_figure_separately(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_6)
+        doc_getter = DocumentGetter(document)
+
+        section = doc_getter.get_component_by_path('/sections/S2/S2.SS4')
+
+        assert isinstance(section, doc_models.Section)
+        assert [
+            component.component_id
+            for component in section.components
+            if isinstance(component, doc_models.Figure)
+        ] == ['S2.F1', 'S2.F2']
+
+        figure_1 = doc_getter.get_component_by_path('/sections/S2/S2.SS4/S2.F1')
+
+        assert isinstance(figure_1, doc_models.Figure)
+        assert figure_1.caption.startswith('Figure 1: Illustration of the Scheduled Sampling')
+        assert len(figure_1.subfigures) == 1
+        assert (
+            figure_1.subfigures[0].image_src
+            == 'https://ar5iv.labs.arxiv.org/html/1506.03099/assets/process.png'
+        )
+
+        figure_2 = doc_getter.get_component_by_path('/sections/S2/S2.SS4/S2.F2')
+
+        assert isinstance(figure_2, doc_models.Figure)
+        assert figure_2.caption == 'Figure 2: Examples of decay schedules.'
+        assert len(figure_2.subfigures) == 1
+        assert (
+            figure_2.subfigures[0].image_src
+            == 'https://ar5iv.labs.arxiv.org/html/1506.03099/assets/decay.svg'
+        )
+
+    def test_parses_correct_caption_with_inline_elements(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_4)
+        doc_getter = DocumentGetter(document)
+
+        figure = doc_getter.get_component_by_path('/sections/S4/S4.SS1/S4.F3')
+
+        assert isinstance(figure, doc_models.Figure)
+
+        caption = figure.caption
+
+        assert isinstance(caption, doc_models.Paragraph)
+        assert caption.component_id == 'caption'
+        assert caption.elements[0].startswith('Figure 3: Four sample alignments found by')
+
+        assert isinstance(caption.elements[1], doc_models.MathExpression)
+        assert caption.elements[1].expression == '\\alpha_{ij}'
+        assert caption.elements[2] == ' of the annotation of the '
+
+        references = [e for e in caption.elements if isinstance(e, doc_models.Reference)]
+
+        assert len(references) == 1
+        assert references[0].ref_type == 'element'
+        assert references[0].target == '/sections/S3/S3.SS1/S3.E6'
+
+        assert not any(
+            isinstance(prev, str) and isinstance(curr, str)
+            for prev, curr in itertools.pairwise(caption.elements)
+        )
+
+    def test_parses_correct_subfigure_caption_with_inline_elements(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_2)
+        doc_getter = DocumentGetter(document)
+
+        figure = doc_getter.get_component_by_path('/sections/A5/A5.F4')
+
+        assert isinstance(figure, doc_models.Figure)
+
+        subcaption = figure.subfigures[0].caption
+
+        assert isinstance(subcaption, doc_models.Paragraph)
+        assert subcaption.elements[0] == '(a) '
+        assert isinstance(subcaption.elements[1], doc_models.MathExpression)
+        assert subcaption.elements[1].expression == '\\hat{F_{0}}=F_{0}'
+
+    def test_parses_citations_in_caption(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_7)
+        figure = DocumentGetter(document).get_component_by_path('/sections/Sx2/Sx2.F1')
+
+        assert isinstance(figure, doc_models.Figure)
+        assert isinstance(figure.caption, doc_models.Paragraph)
+
+        citations = [e for e in figure.caption.elements if isinstance(e, doc_models.Reference)]
+
+        assert [(c.ref_type, c.target) for c in citations] == [('citation', 'bib.bibx21')]
+
+    def test_resolves_references_to_figures_nested_in_uncaptioned_figure(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_6)
+        doc_getter = DocumentGetter(document)
+
+        reference = doc_getter.get_component_by_path('/sections/S2/S2.SS4/S2.SS4.p4.1/5')
+
+        assert isinstance(reference, doc_models.Reference)
+        assert reference.ref_type == 'element'
+        assert reference.target == '/sections/S2/S2.SS4/S2.F2'
 
     def test_parses_correct_equations(self, mock_example_paper):
 
@@ -188,7 +387,60 @@ class TestArxivParser:
             in equation_contents[5]
         )
 
-    def test_parses_correct_references(self, mock_example_paper):
+    def test_parses_separately_numbered_equations_in_group(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_4)
+        doc_getter = DocumentGetter(document)
+
+        equation_1 = doc_getter.get_component_by_path('/sections/S2/S2.SS1/S2.E1')
+        equation_2 = doc_getter.get_component_by_path('/sections/S2/S2.SS1/S2.E2')
+
+        assert isinstance(equation_1, doc_models.MathExpression)
+        assert isinstance(equation_2, doc_models.MathExpression)
+        assert equation_1.expression != equation_2.expression
+
+    def test_parses_multi_row_equation_in_group_as_single_equation(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_5)
+        doc_getter = DocumentGetter(document)
+
+        equation_ids = [
+            equation.component_id
+            for equation in doc_getter.iter_components_of_type(doc_models.MathExpression)
+            if equation.description == 'Equation'
+        ]
+
+        assert equation_ids == [
+            'S2.E1',
+            'S3.E2',
+            'S3.E3',
+            'S3.E4',
+            'S3.E5',
+            'S3.E6',
+            'S3.E7',
+            'S3.E8',
+            'S3.E9',
+        ]
+
+        equation = doc_getter.get_component_by_path('/sections/S3/S3.SS3/S3.E6')
+
+        assert isinstance(equation, doc_models.MathExpression)
+        assert equation.expression.startswith(r'\displaystyle\mathcal{L}^{\overrightarrow{dae}}=')
+        assert r'\displaystyle\mathcal{L}^{\overleftarrow{dae}}=' in equation.expression
+        assert equation.expression.endswith(r'\theta^{\mathcal{T}}_{dec}),')
+
+    def test_resolves_references_to_multi_row_equation(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_5)
+        doc_getter = DocumentGetter(document)
+
+        reference = doc_getter.get_component_by_path('/sections/S3/S3.SS3/S3.SS3.p5.1/1')
+
+        assert isinstance(reference, doc_models.Reference)
+        assert reference.ref_type == 'element'
+        assert reference.target == '/sections/S3/S3.SS3/S3.E6'
+
+    def test_parses_correct_referenced_papers(self, mock_example_paper):
 
         parser = ArxivParser()
         document = parser.parse(EXAMPLE_PAPER_3)
@@ -288,3 +540,22 @@ class TestArxivParser:
         assert list_1.items[1].elements[-1] == '.'
         assert list_1.items[2].elements[0].startswith('Synthesized speech is lack')
         assert list_1.items[2].elements[-1].endswith('prosody in the autoregressive generation.')
+
+    def test_handles_unrecognized_tags_in_paragraph(self, mock_example_paper):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_4)
+
+        doc_getter = DocumentGetter(document)
+        assert isinstance(document.footnotes[2], doc_models.Paragraph)
+        assert (
+            document.footnotes[2].elements[0]
+            == '  http://www.statmt.org/wmt14/translation-task.html '
+        )
+
+        paragraph_with_italic = doc_getter.get_component_by_path('/sections/S2/S2.SS1/S2.SS1.p1.1')
+
+        assert isinstance(paragraph_with_italic, doc_models.Paragraph)
+        assert (
+            paragraph_with_italic.elements[0]
+            == 'Here, we describe briefly the underlying framework, called <em>RNN Encoder–Decoder</em>, proposed by '
+        )

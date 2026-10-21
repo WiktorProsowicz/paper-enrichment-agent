@@ -3,7 +3,7 @@
 See :class:`~paper_enrichment_agent.common.models.document.Document` for the document structure.
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 
 from paper_enrichment_agent.common.models import document as doc_models
 
@@ -61,15 +61,49 @@ class DocumentGetter:
     ) -> Iterator[T]:
         """Returns all components of the specified type from the document."""
 
+        for _, component in self.iter_components_with_paths():
+            if isinstance(component, component_type):
+                yield component
+
+    def iter_components_with_paths(self) -> Iterator[tuple[str, doc_models.DocumentComponent]]:
+        """Returns all components of the document together with their paths.
+
+        The components are yielded in the pre-order of the document tree, starting with the
+        primary sections of the document and followed by its footnotes. Therefore, the order of
+        the yielded components reflects the order in which they appear in the document.
+        """
+
         for section in self._document.sections:
-            for _, component in _iter_component(section, root_path='/sections'):
-                if isinstance(component, component_type):
-                    yield component
+            yield from _iter_component(section, root_path='/sections')
 
         for footnote in self._document.footnotes:
-            for _, component in _iter_component(footnote, root_path='/footnotes'):
-                if isinstance(component, component_type):
-                    yield component
+            yield from _iter_component(footnote, root_path='/footnotes')
+
+    def get_components_on_path(self, target_path: str) -> list[doc_models.DocumentComponent]:
+        """Returns all components on the specified path in the document.
+
+        Raises:
+            ValueError: If the component with the specified path is not found in the document.
+        """
+
+        try:
+            _ = self.get_component_by_path(target_path)
+        except ValueError as err:
+            raise ValueError(f'Component not found in the document: {target_path}') from err
+
+        if target_path.startswith('/sections'):
+            root_components: Sequence[doc_models.DocumentComponent] = self._document.sections
+            root_path = '/sections'
+        else:
+            root_components = self._document.footnotes
+            root_path = '/footnotes'
+
+        return [
+            component
+            for root_component in root_components
+            for path, component in _iter_component(root_component, root_path=root_path)
+            if target_path.startswith(path)
+        ]
 
 
 class DocumentSetter:

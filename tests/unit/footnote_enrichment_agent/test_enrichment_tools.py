@@ -1,0 +1,595 @@
+import pytest
+
+from paper_enrichment_agent.footnote_enrichment_agent.components import enrichment_tools
+from paper_enrichment_agent.common.models import document as doc_models
+
+
+@pytest.fixture
+def make_enrichment_tools(sample_document):
+
+    def make(drop_sections_from_level=1, min_citation_match_threshold=0.95):
+        return enrichment_tools.EnrichmentTools(
+            sample_document,
+            enrichment_tools.EnrichmentTools.Configuration(
+                drop_sections_from_level=drop_sections_from_level,
+                min_citation_match_threshold=min_citation_match_threshold,
+            ),
+        )
+
+    return make
+
+
+@pytest.fixture
+def sample_enrichment_tools(make_enrichment_tools):
+    return make_enrichment_tools()
+
+
+@pytest.fixture
+def sample_document():
+    return doc_models.Document(
+        title='Sample Document',
+        abstract='Sample abstract',
+        description='Sample description',
+        sections=[
+            doc_models.Section(
+                component_id='section_1',
+                title='Sample Section',
+                components=[
+                    doc_models.Paragraph(
+                        component_id='paragraph_1',
+                        elements=[
+                            'This is a formula: ',
+                            doc_models.MathExpression(
+                                component_id='math_1', expression='E=mc^2', format='LaTeX'
+                            ),
+                            ' and these are referenced papers: ',
+                            doc_models.Reference(
+                                ref_type='citation', content_text='1', target='bib1'
+                            ),
+                            doc_models.Reference(
+                                ref_type='citation', content_text='2', target='bib2'
+                            ),
+                            doc_models.Reference(
+                                ref_type='citation', content_text='3', target='bib3'
+                            ),
+                            ' and this is a link: ',
+                            doc_models.Reference(
+                                ref_type='link',
+                                content_text='http://example.com',
+                                target='http://example.com',
+                            ),
+                            ' and this is a reference to element: ',
+                            doc_models.Reference(
+                                ref_type='element',
+                                content_text='Figure 3.1',
+                                target='/sections/nested_section/figure_1',
+                            ),
+                            ' and this is all. Thank you.',
+                        ],
+                    ),
+                    doc_models.List(
+                        component_id='list_1',
+                        ordered=False,
+                        items=[
+                            doc_models.Paragraph(
+                                component_id='list_item_1', elements=['List item 1']
+                            ),
+                            doc_models.Paragraph(
+                                component_id='list_item_2', elements=['List item 2']
+                            ),
+                        ],
+                    ),
+                    doc_models.Section(
+                        component_id='nested_section',
+                        title='Nested Section',
+                        components=[
+                            doc_models.Figure(
+                                component_id='figure_1',
+                                caption=doc_models.Paragraph(
+                                    component_id='caption',
+                                    elements=[
+                                        'Sample figure caption with ',
+                                        doc_models.MathExpression(
+                                            expression='f(x)', format='LaTeX'
+                                        ),
+                                        ' as in ',
+                                        doc_models.Reference(
+                                            ref_type='citation', content_text='1', target='bib1'
+                                        ),
+                                        '.',
+                                    ],
+                                ),
+                                subfigures=[
+                                    doc_models.ImgSubfigure(
+                                        component_id='subfigure_1',
+                                        caption=doc_models.Paragraph(
+                                            component_id='caption',
+                                            elements=[
+                                                'Sample subfigure caption ',
+                                                doc_models.MathExpression(
+                                                    expression='x > 0', format='LaTeX'
+                                                ),
+                                            ],
+                                        ),
+                                        image_src='http://example.com/image1.png',
+                                    ),
+                                    doc_models.TableSubfigure(
+                                        component_id='subfigure_2',
+                                        caption='Sample subfigure caption.',
+                                        table_contents='<table><tr><td>Sample table content</td></tr></table>',
+                                    ),
+                                ],
+                            ),
+                            doc_models.MathExpression(
+                                component_id='equation_1',
+                                expression='a^2 + b^2 = c^2',
+                                format='LaTeX',
+                            ),
+                        ],
+                    ),
+                ],
+            )
+        ],
+        footnotes=[doc_models.Paragraph(component_id='footnote_1', elements=['Sample footnote.'])],
+        referenced_papers=[
+            ('bib1', 'Sample Paper 1'),
+            ('bib2', 'Sample Paper 2'),
+            ('bib3', 'Sample Paper 3'),
+        ],
+    )
+
+
+class TestEnrichmentContext:
+    def test_get_document_tree_returns_tree(self, sample_enrichment_tools):
+
+        expected_tree = {
+            'sections': [
+                {
+                    'type': 'Section',
+                    'component_path': '/sections/section_1',
+                    'title': 'Sample Section',
+                    'components': [
+                        {'type': 'Paragraph', 'component_path': '/sections/section_1/paragraph_1'},
+                        {
+                            'type': 'List',
+                            'component_path': '/sections/section_1/list_1',
+                            'items': [
+                                {
+                                    'type': 'Paragraph',
+                                    'component_path': '/sections/section_1/list_1/list_item_1',
+                                },
+                                {
+                                    'type': 'Paragraph',
+                                    'component_path': '/sections/section_1/list_1/list_item_2',
+                                },
+                            ],
+                        },
+                        {
+                            'type': 'Section',
+                            'component_path': '/sections/section_1/nested_section',
+                            'title': 'Nested Section',
+                            'components': [
+                                {
+                                    'type': 'Figure',
+                                    'component_path': '/sections/section_1/nested_section/figure_1',
+                                    'caption': 'Sample figure caption with $f(x)$ as in [1].',
+                                },
+                                {
+                                    'type': 'MathExpression',
+                                    'component_path': '/sections/section_1/nested_section/equation_1',
+                                },
+                            ],
+                        },
+                    ],
+                }
+            ],
+            'footnotes': [
+                {
+                    'type': 'Paragraph',
+                    'component_path': '/footnotes/footnote_1',
+                }
+            ],
+        }
+
+        assert sample_enrichment_tools.get_document_tree() == expected_tree
+
+    def test_set_footnote_title_updates_footnote(self, sample_enrichment_tools):
+
+        assert sample_enrichment_tools.generate_final_footnote().title == ''
+
+        sample_enrichment_tools.set_footnote_title('Updated Footnote Title')
+
+        assert sample_enrichment_tools.generate_final_footnote().title == 'Updated Footnote Title'
+
+    def test_get_element_content_raises_error_for_invalid_path(self, sample_enrichment_tools):
+        with pytest.raises(ValueError, match='Component not found in the document'):
+            sample_enrichment_tools.get_element_content('/invalid/path')
+
+    @pytest.mark.parametrize(
+        ('path_to_element', 'element_type'),
+        [
+            ('/sections/section_1/list_1', 'List'),
+            ('/sections/section_1/nested_section', 'Section'),
+        ],
+    )
+    def test_get_element_content_raises_error_for_unreadable_element(
+        self, sample_enrichment_tools, path_to_element, element_type
+    ):
+        with pytest.raises(ValueError) as exc_info:
+            sample_enrichment_tools.get_element_content(path_to_element)
+
+        error_message = str(exc_info.value)
+
+        assert f'is a {element_type}, whose content cannot be read' in error_message
+        assert 'Readable element types: Paragraph, Figure, MathExpression' in error_message
+
+    def test_get_element_content_returns_stringified_paragraph(self, sample_enrichment_tools):
+
+        path_to_paragraph = '/sections/section_1/paragraph_1'
+        expected_content = 'This is a formula: $E=mc^2$ and these are referenced papers: [1, 2, 3] and this is a link: http://example.com and this is a reference to element: Figure 3.1 and this is all. Thank you.'
+
+        assert sample_enrichment_tools.get_element_content(path_to_paragraph) == expected_content
+
+    def test_get_element_content_returns_stringified_figure(self, sample_enrichment_tools):
+
+        path_to_figure = '/sections/section_1/nested_section/figure_1'
+
+        expected_details = (
+            'Caption: Sample figure caption with $f(x)$ as in [1].\n'
+            'Subfigures:\n'
+            '\tImgSubfigure (id: subfigure_1): Sample subfigure caption $x > 0$\n'
+            '\tTableSubfigure (id: subfigure_2): Sample subfigure caption.'
+        )
+
+        assert sample_enrichment_tools.get_element_content(path_to_figure) == expected_details
+
+    def test_get_element_content_returns_stringified_equation(self, sample_enrichment_tools):
+
+        path_to_equation = '/sections/section_1/nested_section/equation_1'
+
+        assert (
+            sample_enrichment_tools.get_element_content(path_to_equation)
+            == 'Format: LaTeX\nExpression: a^2 + b^2 = c^2'
+        )
+
+    def test_extract_paragraph_citation_keeps_necessary_components(self, sample_enrichment_tools):
+
+        sample_enrichment_tools.extract_paragraph_citation(
+            path_to_paragraph='/sections/section_1/paragraph_1',
+            begin_anchor='a formula:',
+            end_anchor='this is all.',
+        )
+
+        assert len(sample_enrichment_tools.generate_final_footnote().components) == 1
+
+        extracted_paragraph = sample_enrichment_tools.generate_final_footnote().components[0]
+
+        assert isinstance(extracted_paragraph, doc_models.Paragraph)
+
+        assert extracted_paragraph.elements[0] == 'a formula: '
+        assert isinstance(extracted_paragraph.elements[1], doc_models.MathExpression)
+        assert (
+            extracted_paragraph.elements[2]
+            == ' and these are referenced papers: [1, 2, 3] and this is a link: '
+        )
+        assert isinstance(extracted_paragraph.elements[3], doc_models.Reference)
+        assert (
+            extracted_paragraph.elements[4]
+            == ' and this is a reference to element: Figure 3.1 and this is all.'
+        )
+
+    def test_extract_paragraph_citation_does_not_drop_boundary_components(
+        self, sample_enrichment_tools
+    ):
+
+        sample_enrichment_tools.extract_paragraph_citation(
+            path_to_paragraph='/sections/section_1/paragraph_1',
+            begin_anchor='example.com',
+            end_anchor='this is a reference',
+        )
+
+        assert len(sample_enrichment_tools.generate_final_footnote().components) == 1
+
+        extracted_paragraph = sample_enrichment_tools.generate_final_footnote().components[0]
+
+        assert isinstance(extracted_paragraph, doc_models.Paragraph)
+
+        assert isinstance(extracted_paragraph.elements[0], doc_models.Reference)
+        assert extracted_paragraph.elements[0].content_text == 'http://example.com'
+        assert extracted_paragraph.elements[1] == ' and this is a reference'
+
+    def test_extract_paragraph_citation_tolerates_minor_anchor_mismatches(
+        self, make_enrichment_tools
+    ):
+
+        tools = make_enrichment_tools(min_citation_match_threshold=0.95)
+
+        tools.extract_paragraph_citation(
+            path_to_paragraph='/sections/section_1/paragraph_1',
+            begin_anchor='These are referenced papers:',
+            end_anchor='a reference to element: Figure 3.1 and this is all!',
+        )
+
+        assert len(tools.generate_final_footnote().components) == 1
+
+        extracted_paragraph = tools.generate_final_footnote().components[0]
+
+        assert isinstance(extracted_paragraph, doc_models.Paragraph)
+
+        assert (
+            extracted_paragraph.elements[0]
+            == 'hese are referenced papers: [1, 2, 3] and this is a link: '
+        )
+        assert isinstance(extracted_paragraph.elements[1], doc_models.Reference)
+        assert (
+            extracted_paragraph.elements[2]
+            == ' and this is a reference to element: Figure 3.1 and this is all'
+        )
+
+    @pytest.mark.parametrize(
+        ('begin_anchor', 'end_anchor'),
+        [
+            ('a formula;', 'this is all.'),
+            ('a formula:', 'and this is all, Thank you.'),
+        ],
+    )
+    def test_extract_paragraph_citation_raises_on_major_anchor_mismatches(
+        self, make_enrichment_tools, begin_anchor, end_anchor
+    ):
+
+        tools = make_enrichment_tools(min_citation_match_threshold=0.95)
+
+        with pytest.raises(ValueError, match='not found in paragraph content'):
+            tools.extract_paragraph_citation(
+                path_to_paragraph='/sections/section_1/paragraph_1',
+                begin_anchor=begin_anchor,
+                end_anchor=end_anchor,
+            )
+
+        assert tools.generate_final_footnote().components == []
+
+    def test_extract_paragraph_citation_error_describes_anchor_mismatch(
+        self, sample_enrichment_tools
+    ):
+
+        with pytest.raises(ValueError) as exc_info:
+            sample_enrichment_tools.extract_paragraph_citation(
+                path_to_paragraph='/sections/section_1/paragraph_1',
+                begin_anchor='These are referenced papers:',
+                end_anchor='and this is all, Thank you.',
+            )
+
+        error_message = str(exc_info.value)
+
+        assert 'Anchor "and this is all, Thank you." not found' in error_message
+        assert 'Only 15/27 characters matched' in error_message
+        assert 'Matched part: "and this is all"' in error_message
+        assert 'Unmatched part: "" before it and ", Thank you." after it' in error_message
+        assert 'closest text in the paragraph is: "and this is all. Thank you."' in error_message
+
+    def test_extract_paragraph_citation_error_on_anchor_with_no_common_text(
+        self, sample_enrichment_tools
+    ):
+
+        with pytest.raises(ValueError, match='no common text was found'):
+            sample_enrichment_tools.extract_paragraph_citation(
+                path_to_paragraph='/sections/section_1/paragraph_1',
+                begin_anchor='These are referenced papers:',
+                end_anchor='###',
+            )
+
+    def test_extract_whole_paragraph_raises_on_non_paragraph_path(self, sample_enrichment_tools):
+        with pytest.raises(ValueError, match='is not a paragraph'):
+            sample_enrichment_tools.extract_whole_paragraph('/sections/section_1/list_1')
+
+        assert sample_enrichment_tools.generate_final_footnote().components == []
+
+    def test_extract_whole_paragraph_extracts_all_elements(self, sample_enrichment_tools):
+
+        sample_enrichment_tools.extract_whole_paragraph('/sections/section_1/paragraph_1')
+
+        assert len(sample_enrichment_tools.generate_final_footnote().components) == 1
+
+        extracted_paragraph = sample_enrichment_tools.generate_final_footnote().components[0]
+
+        assert isinstance(extracted_paragraph, doc_models.Paragraph)
+        assert len(extracted_paragraph.elements) == 11
+        assert extracted_paragraph.elements[0] == 'This is a formula: '
+        assert isinstance(extracted_paragraph.elements[1], doc_models.MathExpression)
+        assert isinstance(extracted_paragraph.elements[3], doc_models.Reference)
+        assert extracted_paragraph.elements[-1] == ' and this is all. Thank you.'
+
+    def test_extract_figure_raises_on_invalid_path(self, sample_enrichment_tools):
+        with pytest.raises(ValueError, match='Component not found in the document'):
+            sample_enrichment_tools.extract_figure('/invalid/path', subfigures_ids=None)
+
+    def test_extract_figure_raises_on_non_figure_path(self, sample_enrichment_tools):
+        with pytest.raises(ValueError, match='is not a figure'):
+            sample_enrichment_tools.extract_figure(
+                '/sections/section_1/paragraph_1', subfigures_ids=None
+            )
+
+    def test_extract_figure_raises_on_wrong_subfigures_ids(self, sample_enrichment_tools):
+
+        with pytest.raises(ValueError, match='Some subfigure ids do not exist in the figure'):
+            sample_enrichment_tools.extract_figure(
+                '/sections/section_1/nested_section/figure_1',
+                subfigures_ids=['subfigure_1', 'subfigure_3'],
+            )
+
+    def test_extract_figure_correctly_extracts_chosen_subfigures(self, sample_enrichment_tools):
+
+        sample_enrichment_tools.extract_figure(
+            '/sections/section_1/nested_section/figure_1',
+            subfigures_ids=['subfigure_1'],
+        )
+
+        assert len(sample_enrichment_tools.generate_final_footnote().components) == 1
+
+        extracted_figure = sample_enrichment_tools.generate_final_footnote().components[0]
+
+        assert isinstance(extracted_figure, doc_models.Figure)
+
+        assert isinstance(extracted_figure.caption, doc_models.Paragraph)
+        assert extracted_figure.caption.elements[0] == 'Sample figure caption with '
+        assert len(extracted_figure.subfigures) == 1
+        assert isinstance(extracted_figure.subfigures[0], doc_models.ImgSubfigure)
+
+    def test_extract_figure_correctly_extracts_all_subfigures(self, sample_enrichment_tools):
+
+        sample_enrichment_tools.extract_figure(
+            '/sections/section_1/nested_section/figure_1',
+            subfigures_ids=None,
+        )
+
+        assert len(sample_enrichment_tools.generate_final_footnote().components) == 1
+
+        extracted_figure = sample_enrichment_tools.generate_final_footnote().components[0]
+
+        assert isinstance(extracted_figure, doc_models.Figure)
+
+        assert isinstance(extracted_figure.caption, doc_models.Paragraph)
+        assert extracted_figure.caption.elements[0] == 'Sample figure caption with '
+        assert len(extracted_figure.subfigures) == 2
+        assert isinstance(extracted_figure.subfigures[0], doc_models.ImgSubfigure)
+        assert isinstance(extracted_figure.subfigures[1], doc_models.TableSubfigure)
+
+    def test_extract_equation_raises_on_invalid_path(self, sample_enrichment_tools):
+        with pytest.raises(ValueError, match='Component not found in the document'):
+            sample_enrichment_tools.extract_equation('/invalid/path')
+
+    def test_extract_equation_raises_on_non_math_expression_path(self, sample_enrichment_tools):
+        with pytest.raises(ValueError, match='is not a math expression'):
+            sample_enrichment_tools.extract_equation('/sections/section_1/paragraph_1')
+
+        assert sample_enrichment_tools.generate_final_footnote().components == []
+
+    def test_extract_equation_extracts_section_equation(self, sample_enrichment_tools):
+
+        sample_enrichment_tools.extract_equation('/sections/section_1/nested_section/equation_1')
+
+        assert len(sample_enrichment_tools.generate_final_footnote().components) == 1
+
+        extracted_equation = sample_enrichment_tools.generate_final_footnote().components[0]
+
+        assert isinstance(extracted_equation, doc_models.MathExpression)
+        assert extracted_equation.expression == 'a^2 + b^2 = c^2'
+        assert extracted_equation.format == 'LaTeX'
+
+
+class TestGenerateFinalFootnote:
+    def test_arranges_components_in_source_document_order(self, sample_enrichment_tools):
+
+        sample_enrichment_tools.extract_equation('/sections/section_1/nested_section/equation_1')
+        sample_enrichment_tools.extract_figure(
+            '/sections/section_1/nested_section/figure_1', subfigures_ids=None
+        )
+        sample_enrichment_tools.extract_whole_paragraph('/sections/section_1/list_1/list_item_2')
+        sample_enrichment_tools.extract_whole_paragraph('/footnotes/footnote_1')
+        sample_enrichment_tools.extract_paragraph_citation(
+            path_to_paragraph='/sections/section_1/paragraph_1',
+            begin_anchor='a formula:',
+            end_anchor='this is all.',
+        )
+
+        components = sample_enrichment_tools.generate_final_footnote().components
+
+        assert len(components) == 5
+        assert components[0].elements[0] == 'a formula: '
+        assert components[1].elements == ['List item 2']
+        assert isinstance(components[2], doc_models.Figure)
+        assert isinstance(components[3], doc_models.MathExpression)
+        assert components[4].elements == ['Sample footnote.']
+
+    def test_keeps_extraction_order_for_same_source(self, sample_enrichment_tools):
+
+        sample_enrichment_tools.extract_paragraph_citation(
+            path_to_paragraph='/sections/section_1/paragraph_1',
+            begin_anchor='and this is all.',
+            end_anchor='Thank you.',
+        )
+        sample_enrichment_tools.extract_paragraph_citation(
+            path_to_paragraph='/sections/section_1/paragraph_1',
+            begin_anchor='This is a formula:',
+            end_anchor='This is a formula:',
+        )
+
+        components = sample_enrichment_tools.generate_final_footnote().components
+
+        assert [c.elements for c in components] == [
+            ['and this is all. Thank you.'],
+            ['This is a formula:'],
+        ]
+
+    def _extract_all_kinds_of_components(self, tools):
+
+        tools.extract_equation('/sections/section_1/nested_section/equation_1')
+        tools.extract_whole_paragraph('/footnotes/footnote_1')
+        tools.extract_figure('/sections/section_1/nested_section/figure_1', subfigures_ids=None)
+        tools.extract_whole_paragraph('/sections/section_1/list_1/list_item_2')
+        tools.extract_whole_paragraph('/sections/section_1/paragraph_1')
+
+    def test_groups_dropped_sections_in_kept_ancestor(self, make_enrichment_tools):
+
+        tools = make_enrichment_tools(drop_sections_from_level=2)
+        self._extract_all_kinds_of_components(tools)
+
+        components = tools.generate_final_footnote().components
+
+        assert len(components) == 2
+
+        section, footnote_paragraph = components
+
+        assert isinstance(section, doc_models.Section)
+        assert section.component_id == 'section_1'
+        assert section.title == 'Sample Section'
+        assert [type(c) for c in section.components] == [
+            doc_models.Paragraph,
+            doc_models.Paragraph,
+            doc_models.Figure,
+            doc_models.MathExpression,
+        ]
+        assert section.components[1].elements == ['List item 2']
+
+        assert footnote_paragraph.elements == ['Sample footnote.']
+
+    def test_reproduces_nested_sections(self, make_enrichment_tools):
+
+        tools = make_enrichment_tools(drop_sections_from_level=3)
+        self._extract_all_kinds_of_components(tools)
+
+        components = tools.generate_final_footnote().components
+
+        assert len(components) == 2
+
+        section, footnote_paragraph = components
+
+        assert section.component_id == 'section_1'
+        assert [type(c) for c in section.components] == [
+            doc_models.Paragraph,
+            doc_models.Paragraph,
+            doc_models.Section,
+        ]
+
+        nested_section = section.components[2]
+
+        assert nested_section.component_id == 'nested_section'
+        assert nested_section.title == 'Nested Section'
+        assert [type(c) for c in nested_section.components] == [
+            doc_models.Figure,
+            doc_models.MathExpression,
+        ]
+
+        assert footnote_paragraph.elements == ['Sample footnote.']
+
+    def test_omits_sections_without_extracted_components(self, make_enrichment_tools):
+
+        tools = make_enrichment_tools(drop_sections_from_level=3)
+        tools.extract_equation('/sections/section_1/nested_section/equation_1')
+
+        section = tools.generate_final_footnote().components[0]
+
+        assert section.component_id == 'section_1'
+        assert len(section.components) == 1
+        assert section.components[0].component_id == 'nested_section'
+        assert isinstance(section.components[0].components[0], doc_models.MathExpression)

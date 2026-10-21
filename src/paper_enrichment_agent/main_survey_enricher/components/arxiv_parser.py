@@ -4,7 +4,9 @@ See :class:`~paper_enrichment_agent.common.models.document.Document`. The arXiv 
 from their html format using the ar5iv.labs.arxiv.org/html/[id] endpoint.
 """
 
+import itertools
 import re
+from collections.abc import Iterator
 from typing import cast
 
 import bs4
@@ -61,6 +63,7 @@ class ArxivParser:
         soup = bs4.BeautifulSoup(response.content, 'html.parser')
 
         document = doc_models.Document(
+            title=self._extract_document_title(soup),
             abstract=self._extract_abstract(soup),
             description=f'arXiv:{paper_id}',
             sections=[
@@ -76,6 +79,8 @@ class ArxivParser:
 
         self._resolve_references(document)
 
+        self._merge_consecutive_strings_in_paragraphs(document)
+
         # Fix the image sources to point to the ar5iv.labs.arxiv.org domain.
         for image in document_manipulators.DocumentGetter(document).iter_components_of_type(
             doc_models.ImgSubfigure
@@ -89,7 +94,17 @@ class ArxivParser:
 
         doc_getter = document_manipulators.DocumentGetter(document)
 
-        for reference in doc_getter.iter_components_of_type(doc_models.Reference):
+        # Captions are not part of the document tree, so their references are collected manually
+        caption_references = (
+            element
+            for caption in self._iter_caption_paragraphs(doc_getter)
+            for element in caption.elements
+            if isinstance(element, doc_models.Reference)
+        )
+
+        for reference in itertools.chain(
+            doc_getter.iter_components_of_type(doc_models.Reference), caption_references
+        ):
             if reference.ref_type == 'element':
                 # Both internal and external links are represented as .ltx_ref. Links that do not
                 # reference an element id have to be treated as external links.
@@ -117,6 +132,37 @@ class ArxivParser:
                 raise self.ParsingError(
                     f'Failed to resolve citation reference target with ID "{reference.target}".'
                 )
+
+    def _merge_consecutive_strings_in_paragraphs(self, document: doc_models.Document) -> None:
+        """Merges consecutive str elements in paragraphs into a single str element."""
+
+        doc_getter = document_manipulators.DocumentGetter(document)
+
+        for paragraph in itertools.chain(
+            doc_getter.iter_components_of_type(doc_models.Paragraph),
+            self._iter_caption_paragraphs(doc_getter),
+        ):
+            new_elements: list[doc_models.Paragraph.InlineParagraphElement] = []
+
+            for is_sequence_of_strings, elements in itertools.groupby(
+                paragraph.elements, key=lambda e: isinstance(e, str)
+            ):
+                if is_sequence_of_strings:
+                    new_elements.append(''.join(elements))  # type: ignore[arg-type]
+                else:
+                    new_elements.extend(elements)
+
+            paragraph.elements = new_elements
+
+    def _iter_caption_paragraphs(
+        self, doc_getter: document_manipulators.DocumentGetter
+    ) -> Iterator[doc_models.Paragraph]:
+        """Yields the captions of figures and subfigures that are stored as paragraphs."""
+
+        for figure in doc_getter.iter_components_of_type(doc_models.Figure):
+            for caption in [figure.caption, *(sf.caption for sf in figure.subfigures)]:
+                if isinstance(caption, doc_models.Paragraph):
+                    yield caption
 
     def _decode_section(self, section_tag: bs4.Tag) -> doc_models.Section:
         """Decodes a section from the arXiv paper.
@@ -147,19 +193,36 @@ class ArxivParser:
                         components.append(equation)
 
                     elif 'ltx_equationgroup' in paragraph_tag['class']:
-                        for equation_tag in paragraph_tag.select('tbody'):
+                        collected_equations: list[doc_models.MathExpression] = []
+
+                        # A group of separately numbered equations keeps each one in its own
+                        # `tbody` with an id. A single numbered equation spanning multiple rows
+                        # has an anonymous `tbody` and is identified by the id of the group.
+                        equation_tags = [
+                            tbody_tag
+                            for tbody_tag in paragraph_tag.select('tbody')
+                            if 'id' in tbody_tag.attrs
+                        ] or [paragraph_tag]
+
+                        for equation_tag in equation_tags:
                             equation = self._decode_equation(equation_tag)
 
                             self._referencable_components[equation.component_id] = equation
-                            components.append(equation)
+                            collected_equations.append(equation)
+
+                        self._referencable_components[str(paragraph_tag['id'])] = (
+                            collected_equations[0]
+                        )
+                        components.extend(collected_equations)
 
                     elif paragraph_tag.name == 'ol' or paragraph_tag.name == 'ul':
                         components.append(self._decode_list(paragraph_tag))
 
             elif child.name == 'figure':
-                figure = self._decode_figure(child)
-                self._referencable_components[figure.component_id] = figure
-                components.append(figure)
+                for figure_tag in self._select_figure_tags(child):
+                    figure = self._decode_figure(figure_tag)
+                    self._referencable_components[figure.component_id] = figure
+                    components.append(figure)
 
             elif child.name == 'section' and any(
                 cl in list(child['class']) for cl in self._ALLOWED_SECTION_CLASSES
@@ -203,6 +266,24 @@ class ArxivParser:
             format='LaTeX',
         )
 
+    def _select_figure_tags(self, figure_tag: bs4.Tag) -> list[bs4.Tag]:
+        """Returns the tags of the figures contained in the given `figure` tag.
+
+        A `figure` tag without its own caption may be a layout container placing independent,
+        separately captioned figures side by side. In such case the nested figures are returned.
+        """
+
+        if figure_tag.select_one(':scope > figcaption.ltx_caption'):
+            return [figure_tag]
+
+        nested_figure_tags = [
+            nested_tag
+            for nested_tag in figure_tag.select('figure.ltx_figure')
+            if nested_tag.find_parent('figure') is figure_tag
+        ]
+
+        return nested_figure_tags or [figure_tag]
+
     def _decode_figure(self, figure_tag: bs4.Tag) -> doc_models.Figure:
         """Decodes a figure from the given `figure` tag paper."""
 
@@ -211,16 +292,16 @@ class ArxivParser:
         figure = doc_models.Figure(
             component_id=str(figure_tag['id']),
             subfigures=[],
-            caption=self._extract_clean_text(main_caption),
+            caption=self._decode_caption(main_caption),
             description='Figure',
         )
 
-        for subfigure_tag in figure_tag.select('img.ltx_graphics, table.ltx_tabular'):
+        for subfigure_tag in figure_tag.select('.ltx_graphics, table.ltx_tabular'):
             subcaption_tag = subfigure_tag.find_next_sibling(class_='ltx_caption')
 
-            subcaption = self._extract_clean_text(subcaption_tag) if subcaption_tag else None
+            subcaption = self._decode_caption(subcaption_tag) if subcaption_tag else None
 
-            if 'img' in subfigure_tag.name:
+            if subfigure_tag.name == 'img':
                 figure.subfigures.append(
                     doc_models.ImgSubfigure(
                         description='Image subfigure',
@@ -228,6 +309,16 @@ class ArxivParser:
                         caption=subcaption,
                     )
                 )
+
+            elif subfigure_tag.name == 'object' and subfigure_tag.get('type') == 'image/svg+xml':
+                figure.subfigures.append(
+                    doc_models.ImgSubfigure(
+                        description='SVG image subfigure',
+                        image_src=str(subfigure_tag['data']),
+                        caption=subcaption,
+                    )
+                )
+
             else:
                 figure.subfigures.append(
                     doc_models.TableSubfigure(
@@ -238,6 +329,33 @@ class ArxivParser:
                 )
 
         return figure
+
+    def _decode_caption(self, caption_tag: bs4.Tag) -> str | doc_models.Paragraph:
+        """Decodes a caption of a figure or a subfigure.
+
+        A caption with no citations, references, inline math or notes is decoded as plain text.
+        Otherwise it is decoded as a paragraph, preceded by the caption's tag (e.g. "Figure 1:").
+        Only direct children are checked, since those are the only ones decoded in a paragraph.
+        """
+
+        rich_elements_query = (
+            ':scope > .ltx_cite, :scope > .ltx_Math, :scope > a.ltx_ref, :scope > .ltx_note'
+        )
+
+        if not caption_tag.select(rich_elements_query):
+            return self._extract_clean_text(caption_tag)
+
+        caption = self._decode_paragraph(caption_tag)
+        caption.component_id = 'caption'
+        caption.description = 'Caption'
+
+        if caption.elements and isinstance(caption.elements[0], str):
+            caption.elements[0] = caption.elements[0].lstrip()
+
+        if preamble_tag := caption_tag.select_one(':scope > .ltx_tag'):
+            caption.elements.insert(0, f'{self._extract_clean_text(preamble_tag)} ')
+
+        return caption
 
     def _decode_paragraph(self, paragraph_tag: bs4.Tag) -> doc_models.Paragraph:
         """Decodes a paragraph from .ltx_para div.
@@ -280,7 +398,7 @@ class ArxivParser:
                 self._referencable_components[math_exp.component_id] = math_exp
                 paragraph_contents.append(math_exp)
 
-            elif 'ltx_ref' in child['class']:
+            elif 'ltx_ref' in child['class'] and child.name == 'a':
                 paragraph_contents.append(
                     doc_models.Reference(
                         component_id=str(child_idx),
@@ -311,11 +429,33 @@ class ArxivParser:
                     )
                 )
 
+            else:
+                decoded_stringlike = self._try_decode_stringlike_paragraph_element(child)
+
+                if decoded_stringlike is not None:
+                    paragraph_contents.append(decoded_stringlike)
+
         return doc_models.Paragraph(
             component_id=str(paragraph_tag['id']) if 'id' in paragraph_tag.attrs else '',
             description='Paragraph',
             elements=paragraph_contents,
         )
+
+    def _extract_document_title(self, soup: bs4.BeautifulSoup) -> str:
+        """Extracts the title from the arXiv paper.
+
+        Only the top-level text of the title tag is taken, since notes attached to the title
+        (e.g. footnotes or `\\thanks` acknowledgements) are rendered inline as nested tags.
+        """
+
+        title_tag = soup.select_one('h1.ltx_title')
+
+        if not title_tag:
+            raise self.ParsingError('Failed to extract title from arXiv paper.')
+
+        title_text = ' '.join(title_tag.find_all(string=True, recursive=False))
+
+        return re.sub(r'\s+', ' ', title_text).strip()
 
     def _extract_abstract(self, soup: bs4.BeautifulSoup) -> str:
         """Extracts the abstract from the arXiv paper."""
@@ -325,7 +465,25 @@ class ArxivParser:
         if not abstract_tag:
             raise self.ParsingError('Failed to extract abstract from arXiv paper.')
 
-        return abstract_tag.find(string=True, recursive=False).strip()  # type: ignore
+        return re.sub(r'\s+', ' ', abstract_tag.get_text().strip())
+
+    def _try_decode_stringlike_paragraph_element(self, element_tag: bs4.Tag) -> str | None:
+        """Decodes a paragraph element that is not a string, yet should be represented as such.
+
+        The string-like elements are not special document components (e.g. math expressions) and
+        are to be handled as scalar HTML elements, such as <strong>.
+        """
+
+        if 'ltx_font_italic' in element_tag['class']:
+            return f'<em>{self._extract_clean_text(element_tag)}</em>'
+
+        if 'ltx_font_bold' in element_tag['class']:
+            return f'<strong>{self._extract_clean_text(element_tag)}</strong>'
+
+        if 'ltx_url' in element_tag['class']:
+            return self._extract_clean_text(element_tag)
+
+        return None
 
     def _extract_bibliography(self, soup: bs4.BeautifulSoup) -> list[tuple[str, str]]:
         """Extracts the bibliography from the arXiv paper."""

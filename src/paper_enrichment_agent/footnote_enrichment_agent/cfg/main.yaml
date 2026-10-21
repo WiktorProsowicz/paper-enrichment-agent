@@ -1,0 +1,23 @@
+---
+json_logs_path: /tmp/output_logs.jsonl
+
+app_port: 8081
+
+mlflow_cfg:
+  tracking_uri: http://mlflow:5000
+
+agent_cfg:
+  citation_context_chars: 800
+  mcp_server_url_base: http://localhost:8081/mcp
+  agent_recursion_limit: 50
+
+enrichment_tools_cfg:
+  drop_sections_from_level: 3
+  min_citation_match_threshold: 0.95
+
+agent_llm_model: ''
+
+agent_llm_params:
+  temperature: 0.7
+
+llm_api_key: ''
