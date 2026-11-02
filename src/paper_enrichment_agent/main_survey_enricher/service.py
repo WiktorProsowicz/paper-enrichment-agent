@@ -8,12 +8,13 @@ fulfill the designed use cases of the entire application.
 import time
 from functools import cache
 
+from prometheus_client import Counter, Gauge, Summary
+
 from paper_enrichment_agent.common import document_manipulators, logging_setup
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models.misc import DocumentMetadata, SurveyMetadata
 from paper_enrichment_agent.main_survey_enricher.components.arxiv_parser import ArxivParser
 from paper_enrichment_agent.main_survey_enricher.components.doc_db_client import DocDBClient
-from paper_enrichment_agent.main_survey_enricher.components.metrics import Metrics
 
 
 @cache
@@ -27,7 +28,7 @@ class MainSurveyEnricherService:
     class MainSurveyEnricherError(Exception):
         """Base class for exceptions raised by the `main_survey_enricher` service."""
 
-    def __init__(self, metrics: Metrics, db_client: DocDBClient) -> None:
+    def __init__(self, metrics: 'Metrics', db_client: DocDBClient) -> None:
 
         self._metrics = metrics
         self._db_client = db_client
@@ -263,3 +264,62 @@ class MainSurveyEnricherService:
             raise self.MainSurveyEnricherError(
                 f'Failed to remove component "{component_path}" from the document {paper_id}: {e}'
             ) from e
+
+
+class Metrics:
+    """Metrics for the `main_survey_enricher` service.
+
+    The metrics are registered in the default Prometheus registry, so a single `Metrics` instance
+    should be created per process. They are exposed by the service's `/metrics` endpoint.
+    """
+
+    def __init__(self) -> None:
+
+        self.papers_added = Counter(
+            'papers_added',
+            'Number of papers added to the system.',
+            labelnames=['source'],
+            namespace='main_survey_enricher',
+        )
+
+        self.papers_parsed = Counter(
+            'papers_parsed',
+            'Number of papers parsed by the system.',
+            labelnames=['source', 'status'],  # status can be 'success' or 'failure'
+            namespace='main_survey_enricher',
+        )
+
+        self.papers_removed = Counter(
+            'papers_removed',
+            'Number of papers removed from the system.',
+            namespace='main_survey_enricher',
+        )
+
+        self.characters_translated = Gauge(
+            'characters_translated',
+            'Number of characters translated by the system.',
+            namespace='main_survey_enricher',
+        )
+
+        self.footnotes_enriched = Gauge(
+            'footnotes_enriched',
+            'Number of footnotes enriched by the system.',
+            namespace='main_survey_enricher',
+        )
+
+        self.paper_parsing_time = Summary(
+            'paper_parsing_time',
+            'Time spent on successful parsing of papers by the system.',
+            namespace='main_survey_enricher',
+        )
+
+        self.doc_db_operations_time = Summary(
+            'doc_db_operations_time',
+            'Time spent on operations with the document database by the system.',
+            namespace='main_survey_enricher',
+        )
+
+        self.papers_added.labels(source='arxiv')
+
+        for status in ('success', 'failure'):
+            self.papers_parsed.labels(source='arxiv', status=status)
