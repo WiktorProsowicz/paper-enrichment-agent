@@ -12,6 +12,11 @@ RUN apt update && \
     apt install -y curl && \
     rm -rf /var/cache/apt/archives /var/lib/apt/lists/*
 
+# Directory for the services' JSONL logs. Named volumes mounted here inherit its ownership,
+# so that the non-root user can write the logs.
+RUN mkdir -p /var/log/paper-enrichment-agent \
+    && chown python:python-group /var/log/paper-enrichment-agent
+
 USER python
 WORKDIR ${APP_WORKDIR}
 

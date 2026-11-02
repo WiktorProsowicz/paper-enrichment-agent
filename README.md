@@ -24,6 +24,22 @@ You realize that you are unlikely to grasp the topic fully without additional co
 
 ![Architecture](docs/architecture.drawio.png)
 
+## Running the backend
+
+The backend is started with `just setup_app_backend` and defined in
+[infrastructure/app-backend.yaml](infrastructure/app-backend.yaml), whose comments describe each
+service in detail.
+
+| Service | Role | Host port |
+| --- | --- | --- |
+| `main-survey-enricher` | Serves the user-facing API. | 8082 |
+| `footnote-enrichment-agent` | Composes footnotes from the cited papers. | - |
+| `s3-database` | Stores the documents. The filer UI at `localhost:8888/buckets/document-database/` lets you browse them. | 8888 (localhost only) |
+| `alloy` | Ships the services' logs to Loki. | - |
+| `loki` | Stores the logs. | 3100 |
+| `prometheus` | Collects and stores the services' metrics. | 9090 |
+| `grafana` | Displays the dashboards. | 3000 |
+
 ## Evaluation
 
 ### Footnote Enrichment Agent

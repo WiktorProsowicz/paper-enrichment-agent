@@ -1,0 +1,13 @@
+---
+# Loads the dashboards kept in `infrastructure/observability/grafana/dashboards/`. Changes made in
+# the UI cannot be saved; export the dashboard JSON to that directory instead.
+apiVersion: 1
+
+providers:
+  - name: paper-enrichment-agent
+    folder: Paper Enrichment Agent
+    type: file
+    allowUiUpdates: false
+    disableDeletion: true
+    options:
+      path: /etc/grafana/dashboards
