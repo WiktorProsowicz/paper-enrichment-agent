@@ -47,6 +47,52 @@ setup_mlflow_server_clean:
     docker compose -f infrastructure/mlflow-server.yaml --env-file mlflow.env down -v
     docker compose -f infrastructure/mlflow-server.yaml --env-file mlflow.env up --build -d
 
+# Builds the runtime image and starts the application backend with its observability stack
+setup_app_backend:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Setting up the application backend..."
+
+    if [ ! -f app.env ]; then
+        echo "app.env file not found. Please create it with the necessary environment variables."
+        exit 1
+    fi
+
+    if ! docker network inspect paper-enrichment-agent-network > /dev/null 2>&1; then
+        echo "Network paper-enrichment-agent-network not found. Run 'just setup_mlflow_server' first."
+        exit 1
+    fi
+
+    docker build -t app-base:runtime --target runtime -f infrastructure/app-base.Dockerfile .
+    docker compose -f infrastructure/app-backend.yaml --env-file app.env up -d --force-recreate
+
+# Stops the application backend, keeping the stored documents, logs and metrics
+teardown_app_backend:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Tearing down the application backend..."
+
+    if [ ! -f app.env ]; then
+        echo "app.env file not found. Please create it with the necessary environment variables."
+        exit 1
+    fi
+
+    docker compose -f infrastructure/app-backend.yaml --env-file app.env down
+
+# Stops the application backend, wipes its volumes (documents, logs, metrics) and rebuilds it
+setup_app_backend_clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Cleaning up the application backend..."
+
+    if [ ! -f app.env ]; then
+        echo "app.env file not found. Please create it with the necessary environment variables."
+        exit 1
+    fi
+
+    docker compose -f infrastructure/app-backend.yaml --env-file app.env down -v
+    just setup_app_backend
+
 # Runs the LLM evaluation pipeline
 run_llm_eval:
     #!/usr/bin/env bash
