@@ -80,7 +80,7 @@ class MainSurveyEnricherService:
                 description=description,
                 error=str(e),
             )
-            self._metrics.papers_parsed.labels(source='arxiv', status='failed').inc()
+            self._metrics.papers_parsed.labels(source='arxiv', status='failure').inc()
 
             raise self.MainSurveyEnricherError(
                 f'Failed to parse the arXiv paper with ID {arxiv_id}: {e}'

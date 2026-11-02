@@ -12,6 +12,7 @@ import fastapi
 import hydra
 import mlflow
 import omegaconf
+import prometheus_client
 import pydantic
 import uvicorn
 from langchain_litellm import ChatLiteLLM
@@ -96,6 +97,8 @@ def create_app(
     """Creates a FastAPI application for the `footnote_enrichment_agent` service."""
 
     app = fastapi.FastAPI(title='Footnote Enrichment Agent')
+
+    app.mount('/metrics', prometheus_client.make_asgi_app())
 
     @app.get('/health')
     async def health() -> dict[str, str]:

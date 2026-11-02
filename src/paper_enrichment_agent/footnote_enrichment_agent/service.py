@@ -110,3 +110,7 @@ class Metrics:
             'Time spent on successful footnote enrichment requests.',
             namespace='footnote_enrichment_agent',
         )
+
+        for status in ('success', 'failure'):
+            self.enrichment_requests.labels(status=status)
+            self.improvement_requests.labels(status=status)

@@ -206,7 +206,7 @@ class TestRegisterArxivSurvey:
                 arxiv_id=SAMPLE_ARXIV_ID, name=SAMPLE_NAME, description=SAMPLE_DESCRIPTION
             )
 
-        mock_metrics.papers_parsed.labels.assert_called_once_with(source='arxiv', status='failed')
+        mock_metrics.papers_parsed.labels.assert_called_once_with(source='arxiv', status='failure')
         mock_metrics.papers_parsed.labels.return_value.inc.assert_called_once()
 
         assert mock_metrics.paper_parsing_time.observe.call_count == 0
