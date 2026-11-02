@@ -20,6 +20,7 @@ from pydantic import Field
 
 from paper_enrichment_agent.common import logging_setup
 from paper_enrichment_agent.common.models import misc as misc_models
+from paper_enrichment_agent.common.models import service_conn as conn_models
 from paper_enrichment_agent.main_survey_enricher.components.doc_db_client import DocDBClient
 from paper_enrichment_agent.main_survey_enricher.service import MainSurveyEnricherService, Metrics
 
@@ -87,13 +88,13 @@ def create_app(service: MainSurveyEnricherService) -> fastapi.FastAPI:
         return {'status': 'ok'}
 
     @app.post('/register_arxiv_survey')
-    def register_arxiv_survey(request: misc_models.ArxivSurveyRegistrationRequest) -> None:
+    def register_arxiv_survey(request: conn_models.ArxivSurveyRegistrationRequest) -> None:
         service.register_arxiv_survey(
             arxiv_id=request.arxiv_id, name=request.name, description=request.description
         )
 
     @app.post('/remove_survey')
-    def remove_survey(request: misc_models.SurveyRemovalRequest) -> None:
+    def remove_survey(request: conn_models.SurveyRemovalRequest) -> None:
         service.remove_survey(request.survey_id)
 
     @app.get('/list_surveys')
@@ -105,12 +106,12 @@ def create_app(service: MainSurveyEnricherService) -> fastapi.FastAPI:
         return service.get_survey_info(survey_id)
 
     @app.get('/get_document_details')
-    def get_document_details(paper_id: str) -> misc_models.DocumentDetailsResponse:
+    def get_document_details(paper_id: str) -> conn_models.DocumentDetailsResponse:
         metadata, document = service.get_document_details(paper_id)
-        return misc_models.DocumentDetailsResponse(metadata=metadata, document=document)
+        return conn_models.DocumentDetailsResponse(metadata=metadata, document=document)
 
     @app.post('/remove_document_component')
-    def remove_document_component(request: misc_models.DocumentComponentRemovalRequest) -> None:
+    def remove_document_component(request: conn_models.DocumentComponentRemovalRequest) -> None:
         service.remove_document_component(
             paper_id=request.paper_id, component_path=request.component_path
         )

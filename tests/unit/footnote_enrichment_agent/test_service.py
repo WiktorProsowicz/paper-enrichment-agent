@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock
 
 from paper_enrichment_agent.common.models import document as doc_models
-from paper_enrichment_agent.common.models.misc import FootnoteEnrichmentRequest
+from paper_enrichment_agent.common.models.service_conn import FootnoteEnrichmentRequest
 from paper_enrichment_agent.footnote_enrichment_agent.components.enrichment_context_manager import (
     EnrichmentContextManager,
 )

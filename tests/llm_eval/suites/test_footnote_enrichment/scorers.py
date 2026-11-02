@@ -16,7 +16,7 @@ import pydantic
 
 
 from paper_enrichment_agent.common.models import document as doc_models
-from paper_enrichment_agent.common.models import misc as misc_models
+from paper_enrichment_agent.common.models import service_conn as conn_models
 from paper_enrichment_agent.common import document_manipulators
 from paper_enrichment_agent.footnote_enrichment_agent.components import doc_utils
 
@@ -331,7 +331,7 @@ def agent_execution_stats_metrics(outputs: doc_models.Section, trace: Trace) -> 
     reason_spans = trace.search_spans(name=AGENT_REASONING_SPAN_NAME)
     action_spans = trace.search_spans(name=AGENT_ACTION_SPAN_NAME)
 
-    enrichment_request = misc_models.FootnoteEnrichmentRequest(
+    enrichment_request = conn_models.FootnoteEnrichmentRequest(
         **trace.search_spans(name=AGENT_INVOCATION_SPAN_NAME)[0].inputs['request']
     )
 
@@ -397,10 +397,10 @@ def spawn_specific_tool_usage_metrics(tool_name: str) -> Scorer:
 
 def _get_request_and_citation_fragment(
     trace: Trace,
-) -> tuple[misc_models.FootnoteEnrichmentRequest, str]:
+) -> tuple[conn_models.FootnoteEnrichmentRequest, str]:
     """Recovers the enrichment request from the trace and the fragment citing the document."""
 
-    enrichment_request = misc_models.FootnoteEnrichmentRequest(
+    enrichment_request = conn_models.FootnoteEnrichmentRequest(
         **trace.search_spans(name=AGENT_INVOCATION_SPAN_NAME)[0].inputs['request']
     )
 

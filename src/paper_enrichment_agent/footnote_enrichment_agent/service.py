@@ -13,7 +13,7 @@ from prometheus_client import Counter, Summary
 
 from paper_enrichment_agent.common import logging_setup
 from paper_enrichment_agent.common.models import document as doc_models
-from paper_enrichment_agent.common.models.misc import FootnoteEnrichmentRequest
+from paper_enrichment_agent.common.models.service_conn import FootnoteEnrichmentRequest
 from paper_enrichment_agent.footnote_enrichment_agent.components.agent import (
     FootnoteEnrichmentAgent,
 )

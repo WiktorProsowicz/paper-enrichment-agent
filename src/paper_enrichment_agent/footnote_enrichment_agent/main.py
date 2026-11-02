@@ -22,7 +22,7 @@ from starlette.types import Receive, Scope, Send
 
 from paper_enrichment_agent.common import logging_setup, mlflow_setup
 from paper_enrichment_agent.common.models import document as doc_models
-from paper_enrichment_agent.common.models import misc as misc_models
+from paper_enrichment_agent.common.models import service_conn as conn_models
 from paper_enrichment_agent.footnote_enrichment_agent.components.agent import (
     FootnoteEnrichmentAgent,
 )
@@ -120,7 +120,7 @@ def create_app(
 
     @app.post('/reference_to_footnote')
     async def reference_to_footnote(
-        request: misc_models.FootnoteEnrichmentRequest,
+        request: conn_models.FootnoteEnrichmentRequest,
     ) -> doc_models.Section:
         return await service.reference_to_footnote(request)
 

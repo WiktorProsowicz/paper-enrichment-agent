@@ -6,7 +6,7 @@ from llm_eval.suites.test_footnote_enrichment import data as harness_data
 from llm_eval.suites.test_footnote_enrichment import scorers as harness_scorers
 from llm_eval import core as harness_core
 
-from paper_enrichment_agent.common.models import misc as misc_models
+from paper_enrichment_agent.common.models import service_conn as conn_models
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common import document_manipulators
 from paper_enrichment_agent.main_survey_enricher.components import arxiv_parser
@@ -47,7 +47,7 @@ def test_footnote_enrichment_first_request(suite_run: harness_core.EvaluationRun
 
         assert isinstance(referencing_paragraph, doc_models.Paragraph)
 
-        request = misc_models.FootnoteEnrichmentRequest(
+        request = conn_models.FootnoteEnrichmentRequest(
             survey_title=survey_doc.title,
             survey_abstract=survey_doc.abstract,
             reference_document=cited_doc,
