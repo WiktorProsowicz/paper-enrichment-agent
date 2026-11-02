@@ -94,3 +94,43 @@ class FootnoteEnrichmentRequest(pydantic.BaseModel):
             )
         ),
     ]
+
+
+class ArxivSurveyRegistrationRequest(pydantic.BaseModel):
+    """Contains request data for registering an arXiv paper as a survey."""
+
+    arxiv_id: Annotated[
+        str, Field(description='The arXiv ID of the paper to register as a survey.', min_length=1)
+    ]
+    name: Annotated[str, Field(description='The name of the survey document.')]
+    description: Annotated[str, Field(description='The description of the survey document.')]
+
+
+class SurveyRemovalRequest(pydantic.BaseModel):
+    """Contains request data for removing a survey together with its referenced documents."""
+
+    survey_id: Annotated[str, Field(description='The ID of the survey to remove.', min_length=1)]
+
+
+class DocumentComponentRemovalRequest(pydantic.BaseModel):
+    """Contains request data for removing a component from a document."""
+
+    paper_id: Annotated[
+        str, Field(description='The ID of the document to remove the component from.', min_length=1)
+    ]
+    component_path: Annotated[
+        str,
+        Field(
+            description=(
+                'The POSIX-like path of the component to remove, e.g. `/sections/<id>/<id>`.'
+            ),
+            min_length=1,
+        ),
+    ]
+
+
+class DocumentDetailsResponse(pydantic.BaseModel):
+    """Contains detailed information about a document stored in the system."""
+
+    metadata: Annotated[DocumentMetadata, Field(description='The metadata of the document.')]
+    document: Annotated[doc_models.Document, Field(description='The structure of the document.')]

@@ -1,4 +1,148 @@
 """Contains the main entrypoint of the `main_survey_enricher` service.
 
-The script sets up the components of the service and the API endpoints.
+The script sets up the components of the service and runs a FastAPI server exposing the API
+endpoints used by the user-facing components. The documents are stored in an S3-compatible
+document database, whose connection is configured via `AppCfg`.
 """
+
+import functools
+import pathlib
+from typing import Annotated
+
+import boto3
+import fastapi
+import hydra
+import omegaconf
+import prometheus_client
+import pydantic
+import uvicorn
+from pydantic import Field
+
+from paper_enrichment_agent.common import logging_setup
+from paper_enrichment_agent.common.models import misc as misc_models
+from paper_enrichment_agent.main_survey_enricher.components.doc_db_client import DocDBClient
+from paper_enrichment_agent.main_survey_enricher.service import MainSurveyEnricherService, Metrics
+
+
+@functools.cache
+def _logger() -> logging_setup.LoggerType:
+    return logging_setup.get_logger('paper_enrichment_agent.__main__')
+
+
+class AppCfg(pydantic.BaseModel):
+    """Contains configuration of the service."""
+
+    json_logs_path: Annotated[
+        pathlib.Path, Field(description='Output path for storing json log events.')
+    ]
+    app_port: Annotated[int, Field(description='The port on which the FastAPI app will run.')]
+    s3_endpoint_url: Annotated[
+        str, Field(description='The URL of the S3-compatible document database.', min_length=1)
+    ]
+    s3_region: Annotated[
+        str, Field(description='The region passed to the S3 client.', min_length=1)
+    ]
+    s3_access_key_id: Annotated[
+        pydantic.SecretStr,
+        Field(description='The access key ID for the document database.', min_length=1),
+    ]
+    s3_secret_access_key: Annotated[
+        pydantic.SecretStr,
+        Field(description='The secret access key for the document database.', min_length=1),
+    ]
+    doc_db_cfg: Annotated[
+        DocDBClient.Configuration,
+        Field(description='Configuration of the document database client.'),
+    ]
+
+
+def create_app(service: MainSurveyEnricherService) -> fastapi.FastAPI:
+    """Creates a FastAPI application for the `main_survey_enricher` service.
+
+    Each endpoint is named after the `MainSurveyEnricherService` method it delegates to. Reading
+    endpoints use GET with query parameters, while the modifying ones use POST with a JSON body.
+    The route handlers are synchronous, so that the blocking calls to the document database and
+    arXiv are run in the FastAPI's thread pool. Service errors are returned as HTTP 500 responses
+    with the error message in the `detail` field.
+
+    Args:
+        service: The service handling the requests.
+
+    Returns:
+        The configured FastAPI application.
+    """
+
+    app = fastapi.FastAPI(title='Main Survey Enricher')
+
+    app.mount('/metrics', prometheus_client.make_asgi_app())
+
+    @app.exception_handler(MainSurveyEnricherService.MainSurveyEnricherError)
+    async def handle_service_error(
+        request: fastapi.Request, exc: MainSurveyEnricherService.MainSurveyEnricherError
+    ) -> fastapi.responses.JSONResponse:
+        return fastapi.responses.JSONResponse(status_code=500, content={'detail': str(exc)})
+
+    @app.get('/health')
+    def health() -> dict[str, str]:
+        return {'status': 'ok'}
+
+    @app.post('/register_arxiv_survey')
+    def register_arxiv_survey(request: misc_models.ArxivSurveyRegistrationRequest) -> None:
+        service.register_arxiv_survey(
+            arxiv_id=request.arxiv_id, name=request.name, description=request.description
+        )
+
+    @app.post('/remove_survey')
+    def remove_survey(request: misc_models.SurveyRemovalRequest) -> None:
+        service.remove_survey(request.survey_id)
+
+    @app.get('/list_surveys')
+    def list_surveys() -> list[misc_models.SurveyMetadata]:
+        return service.list_surveys()
+
+    @app.get('/get_survey_info')
+    def get_survey_info(survey_id: str) -> misc_models.SurveyMetadata:
+        return service.get_survey_info(survey_id)
+
+    @app.get('/get_document_details')
+    def get_document_details(paper_id: str) -> misc_models.DocumentDetailsResponse:
+        metadata, document = service.get_document_details(paper_id)
+        return misc_models.DocumentDetailsResponse(metadata=metadata, document=document)
+
+    @app.post('/remove_document_component')
+    def remove_document_component(request: misc_models.DocumentComponentRemovalRequest) -> None:
+        service.remove_document_component(
+            paper_id=request.paper_id, component_path=request.component_path
+        )
+
+    return app
+
+
+@hydra.main(version_base='1.3', config_path='cfg', config_name='main')
+def main(hydra_cfg: omegaconf.DictConfig) -> None:
+    """Main entrypoint of the application."""
+
+    app_cfg = AppCfg.model_validate(omegaconf.OmegaConf.to_container(hydra_cfg))
+
+    logging_setup.setup_logging(app_cfg.json_logs_path)
+    _logger().info('Running main_survey_enricher service', cfg=app_cfg)
+
+    s3_client = boto3.client(
+        's3',
+        endpoint_url=app_cfg.s3_endpoint_url,
+        region_name=app_cfg.s3_region,
+        aws_access_key_id=app_cfg.s3_access_key_id.get_secret_value(),
+        aws_secret_access_key=app_cfg.s3_secret_access_key.get_secret_value(),
+    )
+
+    db_client = DocDBClient(s3_client=s3_client, cfg=app_cfg.doc_db_cfg)
+
+    service = MainSurveyEnricherService(metrics=Metrics(), db_client=db_client)
+
+    app = create_app(service=service)
+
+    uvicorn.run(app, host='0.0.0.0', port=app_cfg.app_port)
+
+
+if __name__ == '__main__':
+    main()
