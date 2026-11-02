@@ -4,11 +4,13 @@ import contextlib
 import json
 import uuid
 from collections.abc import Generator
+from typing import Annotated
 
 import pydantic
 import requests
 from botocore.exceptions import ClientError as BotocoreClientError
 from mypy_boto3_s3 import S3Client
+from pydantic import Field
 
 from paper_enrichment_agent.common.document_manipulators import DocumentGetter
 from paper_enrichment_agent.common.models import document as doc_models
@@ -18,16 +20,49 @@ from paper_enrichment_agent.common.models.misc import DocumentMetadata, SurveyMe
 class DocDBClient:
     """Handles read/write requests to the document database.
 
-    The operations raise `DocDBClientError` on failure.
+    The client creates the database's bucket on construction if it is not present yet, so that the
+    operations can assume that the bucket exists. The construction and the operations raise
+    `DocDBClientError` on failure.
     """
 
     class DocDBClientError(Exception):
         """Base class for exceptions raised by the `DocDBClient`."""
 
-    def __init__(self, s3_client: S3Client) -> None:
+    class Configuration(pydantic.BaseModel):
+        """Contains configuration of the `DocDBClient`."""
+
+        bucket_name: Annotated[
+            str,
+            Field(
+                description=(
+                    'The name of the S3 bucket storing the documents. Must be a valid S3 bucket '
+                    'name, i.e. lowercase letters, digits, dots and hyphens only.'
+                ),
+                min_length=3,
+            ),
+        ]
+
+    def __init__(self, s3_client: S3Client, cfg: 'Configuration') -> None:
 
         self._s3_client = s3_client
-        self._s3_bucket = 'document_database'
+        self._s3_bucket = cfg.bucket_name
+
+        try:
+            self._s3_client.head_bucket(Bucket=self._s3_bucket)
+
+        except BotocoreClientError as e:
+            if e.response.get('Error', {}).get('Code') not in ('404', 'NoSuchBucket'):
+                raise self.DocDBClientError(
+                    f'Failed to check the presence of the bucket {self._s3_bucket}: {e}'
+                ) from e
+
+            try:
+                self._s3_client.create_bucket(Bucket=self._s3_bucket)
+
+            except BotocoreClientError as e:
+                raise self.DocDBClientError(
+                    f'Failed to create the bucket {self._s3_bucket}: {e}'
+                ) from e
 
     def document_exists(self, paper_id: str) -> bool:
         """Tells whether a document with the given id is present in the database.
@@ -110,14 +145,13 @@ class DocDBClient:
                 Bucket=self._s3_bucket, Prefix='surveys/', Delimiter='/'
             )
 
-            prefixes = response['CommonPrefixes']
-
-        except (BotocoreClientError, KeyError) as e:
+        except BotocoreClientError as e:
             raise self.DocDBClientError(f'Failed to list surveys in database: {e}') from e
 
         survey_metadata_list = []
 
-        for prefix in prefixes:
+        # S3 omits `CommonPrefixes` from the response when no survey is registered.
+        for prefix in response.get('CommonPrefixes', []):
             survey_prefix = prefix['Prefix']
             metadata_path = f'{survey_prefix}metadata.json'
 
