@@ -1,10 +1,11 @@
 """Contains the client class that communicates with the document database."""
 
+import asyncio
 import contextlib
 import json
 import uuid
-from collections.abc import Generator
-from typing import Annotated
+from collections.abc import AsyncGenerator
+from typing import Annotated, Self
 
 import pydantic
 import requests
@@ -20,9 +21,12 @@ from paper_enrichment_agent.common.models.misc import DocumentMetadata, SurveyMe
 class DocDBClient:
     """Handles read/write requests to the document database.
 
-    The client creates the database's bucket on construction if it is not present yet, so that the
-    operations can assume that the bucket exists. The construction and the operations raise
-    `DocDBClientError` on failure.
+    The client should be created with `create`, which creates the database's bucket if it is not
+    present yet, so that the operations can assume that the bucket exists. The creation and the
+    operations raise `DocDBClientError` on failure.
+
+    The operations are asynchronous. Since the underlying S3 and HTTP clients are blocking, their
+    calls are run in separate threads, so that they do not block the event loop.
     """
 
     class DocDBClientError(Exception):
@@ -47,24 +51,43 @@ class DocDBClient:
         self._s3_client = s3_client
         self._s3_bucket = cfg.bucket_name
 
+    @classmethod
+    def create(cls, s3_client: S3Client, cfg: 'Configuration') -> Self:
+        """Creates the client and ensures that the database's bucket exists.
+
+        The creation is blocking, as it is meant to happen once on the service's startup.
+
+        Args:
+            s3_client: The client of the S3-compatible storage backing the database.
+            cfg: The configuration of the client.
+
+        Returns:
+            The client ready to perform the operations.
+
+        Raises:
+            DocDBClientError: If checking the presence of the bucket or creating it fails.
+        """
+
         try:
-            self._s3_client.head_bucket(Bucket=self._s3_bucket)
+            s3_client.head_bucket(Bucket=cfg.bucket_name)
 
         except BotocoreClientError as e:
             if e.response.get('Error', {}).get('Code') not in ('404', 'NoSuchBucket'):
-                raise self.DocDBClientError(
-                    f'Failed to check the presence of the bucket {self._s3_bucket}: {e}'
+                raise cls.DocDBClientError(
+                    f'Failed to check the presence of the bucket {cfg.bucket_name}: {e}'
                 ) from e
 
             try:
-                self._s3_client.create_bucket(Bucket=self._s3_bucket)
+                s3_client.create_bucket(Bucket=cfg.bucket_name)
 
             except BotocoreClientError as e:
-                raise self.DocDBClientError(
-                    f'Failed to create the bucket {self._s3_bucket}: {e}'
+                raise cls.DocDBClientError(
+                    f'Failed to create the bucket {cfg.bucket_name}: {e}'
                 ) from e
 
-    def document_exists(self, paper_id: str) -> bool:
+        return cls(s3_client=s3_client, cfg=cfg)
+
+    async def document_exists(self, paper_id: str) -> bool:
         """Tells whether a document with the given id is present in the database.
 
         Args:
@@ -75,8 +98,10 @@ class DocDBClient:
         """
 
         try:
-            self._s3_client.head_object(
-                Bucket=self._s3_bucket, Key=f'documents/{paper_id}/metadata.json'
+            await asyncio.to_thread(
+                self._s3_client.head_object,
+                Bucket=self._s3_bucket,
+                Key=f'documents/{paper_id}/metadata.json',
             )
 
         except BotocoreClientError as e:
@@ -89,7 +114,7 @@ class DocDBClient:
 
         return True
 
-    def add_document(
+    async def add_document(
         self, document: doc_models.Document, name: str, description: str
     ) -> DocumentMetadata:
         """Adds a document together with its metadata to the document database.
@@ -105,16 +130,18 @@ class DocDBClient:
 
         doc_metadata = DocumentMetadata(name=name, description=description, images={})
 
-        self._download_and_store_images(document=document, doc_metadata=doc_metadata)
+        await self._download_and_store_images(document=document, doc_metadata=doc_metadata)
 
-        self._upload_model_to_db(
+        await self._upload_model_to_db(
             doc_metadata, path=f'documents/{doc_metadata.paper_id}/metadata.json'
         )
-        self._upload_model_to_db(document, path=f'documents/{doc_metadata.paper_id}/document.json')
+        await self._upload_model_to_db(
+            document, path=f'documents/{doc_metadata.paper_id}/document.json'
+        )
 
         return doc_metadata
 
-    def register_as_survey(self, paper_id: str) -> SurveyMetadata:
+    async def register_as_survey(self, paper_id: str) -> SurveyMetadata:
         """Marks the document with the given id as a survey.
 
         The caller is responsible for ensuring that the document is present in the database,
@@ -129,11 +156,11 @@ class DocDBClient:
 
         survey_metadata = SurveyMetadata(paper_id=paper_id, referenced_docs={})
 
-        self._upload_model_to_db(survey_metadata, path=f'surveys/{paper_id}/metadata.json')
+        await self._upload_model_to_db(survey_metadata, path=f'surveys/{paper_id}/metadata.json')
 
         return survey_metadata
 
-    def get_available_surveys(self) -> list[SurveyMetadata]:
+    async def get_available_surveys(self) -> list[SurveyMetadata]:
         """Returns a list of all available surveys in the document database.
 
         Returns:
@@ -141,8 +168,11 @@ class DocDBClient:
         """
 
         try:
-            response = self._s3_client.list_objects_v2(
-                Bucket=self._s3_bucket, Prefix='surveys/', Delimiter='/'
+            response = await asyncio.to_thread(
+                self._s3_client.list_objects_v2,
+                Bucket=self._s3_bucket,
+                Prefix='surveys/',
+                Delimiter='/',
             )
 
         except BotocoreClientError as e:
@@ -156,12 +186,12 @@ class DocDBClient:
             metadata_path = f'{survey_prefix}metadata.json'
 
             survey_metadata_list.append(
-                self._get_model_from_db(path=metadata_path, model_type=SurveyMetadata)
+                await self._get_model_from_db(path=metadata_path, model_type=SurveyMetadata)
             )
 
         return survey_metadata_list
 
-    def get_survey_info(self, survey_id: str) -> SurveyMetadata:
+    async def get_survey_info(self, survey_id: str) -> SurveyMetadata:
         """Returns the metadata of the survey with the given id.
 
         The caller is responsible for ensuring that the survey is present in the database,
@@ -174,11 +204,11 @@ class DocDBClient:
             The metadata of the requested survey.
         """
 
-        return self._get_model_from_db(
+        return await self._get_model_from_db(
             path=f'surveys/{survey_id}/metadata.json', model_type=SurveyMetadata
         )
 
-    def add_referenced_document(
+    async def add_referenced_document(
         self, survey_id: str, reference_id: str, referenced_paper_id: str
     ) -> None:
         """Adds a referenced document to a survey in the database.
@@ -194,12 +224,12 @@ class DocDBClient:
 
         survey_metadata_path = f'surveys/{survey_id}/metadata.json'
 
-        with self._get_model_reference(
+        async with self._get_model_reference(
             path=survey_metadata_path, model_type=SurveyMetadata
         ) as survey:
             survey.referenced_docs[reference_id] = referenced_paper_id
 
-    def delete_survey(self, survey_id: str) -> None:
+    async def delete_survey(self, survey_id: str) -> None:
         """Deletes a survey and its referenced documents from the database.
 
         The caller is responsible for ensuring that the survey is present in the database,
@@ -210,73 +240,85 @@ class DocDBClient:
         """
 
         try:
-            metadata = self._get_model_from_db(
+            metadata = await self._get_model_from_db(
                 path=f'surveys/{survey_id}/metadata.json', model_type=SurveyMetadata
             )
 
             for referenced_doc_id in metadata.referenced_docs.values():
-                self._delete_document(paper_id=referenced_doc_id)
+                await self._delete_document(paper_id=referenced_doc_id)
 
-            self._s3_client.delete_object(
-                Bucket=self._s3_bucket, Key=f'surveys/{survey_id}/metadata.json'
+            await asyncio.to_thread(
+                self._s3_client.delete_object,
+                Bucket=self._s3_bucket,
+                Key=f'surveys/{survey_id}/metadata.json',
             )
 
-            self._delete_document(paper_id=survey_id)
+            await self._delete_document(paper_id=survey_id)
 
         except BotocoreClientError as e:
             raise self.DocDBClientError(
                 f'Failed to delete survey {survey_id} from database: {e}'
             ) from e
 
-    @contextlib.contextmanager
-    def get_document_struct_ref(self, paper_id: str) -> Generator[doc_models.Document, None, None]:
-        """Returns a context manager that yields a reference to a document structure from the
-        database.
+    @contextlib.asynccontextmanager
+    async def get_document_struct_ref(
+        self, paper_id: str
+    ) -> AsyncGenerator[doc_models.Document, None]:
+        """Returns an async context manager that yields a reference to a document structure from
+        the database.
 
         The context manager ensures that the reference is properly synchronized with the
         database.
         """
 
-        with self._get_model_reference(
+        async with self._get_model_reference(
             path=f'documents/{paper_id}/document.json', model_type=doc_models.Document
         ) as document:
             yield document
 
-    def get_document_metadata(self, paper_id: str) -> DocumentMetadata:
+    async def get_document_metadata(self, paper_id: str) -> DocumentMetadata:
         """Retrieves the metadata of a document from the database.
 
         Args:
             paper_id: The identifier of the document in the database.
         """
 
-        return self._get_model_from_db(
+        return await self._get_model_from_db(
             path=f'documents/{paper_id}/metadata.json', model_type=DocumentMetadata
         )
 
-    def _delete_document(self, paper_id: str) -> None:
+    async def _delete_document(self, paper_id: str) -> None:
         """Deletes a document and its images from the database."""
 
         try:
-            self._s3_client.delete_object(
-                Bucket=self._s3_bucket, Key=f'documents/{paper_id}/metadata.json'
+            await asyncio.to_thread(
+                self._s3_client.delete_object,
+                Bucket=self._s3_bucket,
+                Key=f'documents/{paper_id}/metadata.json',
             )
 
-            self._s3_client.delete_object(
-                Bucket=self._s3_bucket, Key=f'documents/{paper_id}/document.json'
+            await asyncio.to_thread(
+                self._s3_client.delete_object,
+                Bucket=self._s3_bucket,
+                Key=f'documents/{paper_id}/document.json',
             )
 
-            list_images_response = self._s3_client.list_objects_v2(
-                Bucket=self._s3_bucket, Prefix=f'documents/{paper_id}/images/'
+            list_images_response = await asyncio.to_thread(
+                self._s3_client.list_objects_v2,
+                Bucket=self._s3_bucket,
+                Prefix=f'documents/{paper_id}/images/',
             )
             for obj in list_images_response.get('Contents', []):
-                self._s3_client.delete_object(Bucket=self._s3_bucket, Key=obj['Key'])
+                await asyncio.to_thread(
+                    self._s3_client.delete_object, Bucket=self._s3_bucket, Key=obj['Key']
+                )
 
         except BotocoreClientError as e:
             raise self.DocDBClientError(
                 f'Failed to delete document {paper_id} from database: {e}'
             ) from e
 
-    def _download_and_store_images(
+    async def _download_and_store_images(
         self, document: doc_models.Document, doc_metadata: DocumentMetadata
     ) -> None:
         """Downloads and stores the images of a document in the database."""
@@ -291,54 +333,60 @@ class DocDBClient:
                 f'documents/{doc_metadata.paper_id}/images/{image_db_id}.{image_extension}'
             )
 
-            try:
-                with requests.get(image.image_src, stream=True) as response:
-                    response.raise_for_status()
-
-                    self._s3_client.upload_fileobj(
-                        response.raw,
-                        Bucket=self._s3_bucket,
-                        Key=image_db_path,
-                        ExtraArgs={
-                            'ContentType': response.headers.get(
-                                'Content-Type', 'application/octet-stream'
-                            )
-                        },
-                    )
-
-            except requests.RequestException as e:
-                raise self.DocDBClientError(
-                    f'Failed to download image from {image.image_src}: {e}'
-                ) from e
-
-            except Exception as e:
-                raise self.DocDBClientError(
-                    f'Failed to upload image to database at {image_db_path}: {e}'
-                ) from e
+            await asyncio.to_thread(
+                self._transfer_image, image_src=image.image_src, image_db_path=image_db_path
+            )
 
             doc_metadata.images[doc_getter.get_path_of_component(image)] = image_db_path
 
-    @contextlib.contextmanager
-    def _get_model_reference[T: pydantic.BaseModel](
+    def _transfer_image(self, image_src: str, image_db_path: str) -> None:
+        """Streams an image from its source URL to the database (blocking)."""
+
+        try:
+            with requests.get(image_src, stream=True) as response:
+                response.raise_for_status()
+
+                self._s3_client.upload_fileobj(
+                    response.raw,
+                    Bucket=self._s3_bucket,
+                    Key=image_db_path,
+                    ExtraArgs={
+                        'ContentType': response.headers.get(
+                            'Content-Type', 'application/octet-stream'
+                        )
+                    },
+                )
+
+        except requests.RequestException as e:
+            raise self.DocDBClientError(f'Failed to download image from {image_src}: {e}') from e
+
+        except Exception as e:
+            raise self.DocDBClientError(
+                f'Failed to upload image to database at {image_db_path}: {e}'
+            ) from e
+
+    @contextlib.asynccontextmanager
+    async def _get_model_reference[T: pydantic.BaseModel](
         self, path: str, model_type: type[T]
-    ) -> Generator[T, None, None]:
-        """Returns a context manager that yields a Pydantic model reference from the database.
+    ) -> AsyncGenerator[T, None]:
+        """Returns an async context manager that yields a Pydantic model reference from the
+        database.
 
         The context manager ensures that the reference is properly synchronized with the
         database.
         """
 
-        model = self._get_model_from_db(path=path, model_type=model_type)
+        model = await self._get_model_from_db(path=path, model_type=model_type)
 
         yield model
 
-        self._upload_model_to_db(model=model, path=path)
+        await self._upload_model_to_db(model=model, path=path)
 
-    def _get_model_from_db[T: pydantic.BaseModel](self, path: str, model_type: type[T]) -> T:
+    async def _get_model_from_db[T: pydantic.BaseModel](self, path: str, model_type: type[T]) -> T:
         """Retrieves a Pydantic model from the database at the specified path."""
 
         try:
-            json_file = self._s3_client.get_object(Bucket=self._s3_bucket, Key=path)
+            json_bytes = await asyncio.to_thread(self._read_object, path=path)
 
         except BotocoreClientError as e:
             raise self.DocDBClientError(
@@ -346,7 +394,7 @@ class DocDBClient:
             ) from e
 
         try:
-            model = model_type.model_validate_json(json_file['Body'].read().decode('utf-8'))
+            model = model_type.model_validate_json(json_bytes.decode('utf-8'))
 
         except pydantic.ValidationError as e:
             raise self.DocDBClientError(
@@ -355,11 +403,17 @@ class DocDBClient:
 
         return model
 
-    def _upload_model_to_db(self, model: pydantic.BaseModel, path: str) -> None:
+    def _read_object(self, path: str) -> bytes:
+        """Reads the whole content of the object at the specified path (blocking)."""
+
+        return self._s3_client.get_object(Bucket=self._s3_bucket, Key=path)['Body'].read()
+
+    async def _upload_model_to_db(self, model: pydantic.BaseModel, path: str) -> None:
         """Uploads a Pydantic model to the database at the specified path."""
 
         try:
-            self._s3_client.put_object(
+            await asyncio.to_thread(
+                self._s3_client.put_object,
                 Bucket=self._s3_bucket,
                 Key=path,
                 Body=json.dumps(model.model_dump()).encode('utf-8'),

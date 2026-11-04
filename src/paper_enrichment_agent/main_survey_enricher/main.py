@@ -62,9 +62,9 @@ def create_app(service: MainSurveyEnricherService) -> fastapi.FastAPI:
 
     Each endpoint is named after the `MainSurveyEnricherService` method it delegates to. Reading
     endpoints use GET with query parameters, while the modifying ones use POST with a JSON body.
-    The route handlers are synchronous, so that the blocking calls to the document database and
-    arXiv are run in the FastAPI's thread pool. Service errors are returned as HTTP 500 responses
-    with the error message in the `detail` field.
+    The route handlers are asynchronous, since the service offloads its blocking operations to
+    separate threads. Service errors are returned as HTTP 500 responses with the error message in
+    the `detail` field.
 
     Args:
         service: The service handling the requests.
@@ -84,35 +84,37 @@ def create_app(service: MainSurveyEnricherService) -> fastapi.FastAPI:
         return fastapi.responses.JSONResponse(status_code=500, content={'detail': str(exc)})
 
     @app.get('/health')
-    def health() -> dict[str, str]:
+    async def health() -> dict[str, str]:
         return {'status': 'ok'}
 
     @app.post('/register_arxiv_survey')
-    def register_arxiv_survey(request: conn_models.ArxivSurveyRegistrationRequest) -> None:
-        service.register_arxiv_survey(
+    async def register_arxiv_survey(request: conn_models.ArxivSurveyRegistrationRequest) -> None:
+        await service.register_arxiv_survey(
             arxiv_id=request.arxiv_id, name=request.name, description=request.description
         )
 
     @app.post('/remove_survey')
-    def remove_survey(request: conn_models.SurveyRemovalRequest) -> None:
-        service.remove_survey(request.survey_id)
+    async def remove_survey(request: conn_models.SurveyRemovalRequest) -> None:
+        await service.remove_survey(request.survey_id)
 
     @app.get('/list_surveys')
-    def list_surveys() -> list[misc_models.SurveyMetadata]:
-        return service.list_surveys()
+    async def list_surveys() -> list[misc_models.SurveyMetadata]:
+        return await service.list_surveys()
 
     @app.get('/get_survey_info')
-    def get_survey_info(survey_id: str) -> misc_models.SurveyMetadata:
-        return service.get_survey_info(survey_id)
+    async def get_survey_info(survey_id: str) -> misc_models.SurveyMetadata:
+        return await service.get_survey_info(survey_id)
 
     @app.get('/get_document_details')
-    def get_document_details(paper_id: str) -> conn_models.DocumentDetailsResponse:
-        metadata, document = service.get_document_details(paper_id)
+    async def get_document_details(paper_id: str) -> conn_models.DocumentDetailsResponse:
+        metadata, document = await service.get_document_details(paper_id)
         return conn_models.DocumentDetailsResponse(metadata=metadata, document=document)
 
     @app.post('/remove_document_component')
-    def remove_document_component(request: conn_models.DocumentComponentRemovalRequest) -> None:
-        service.remove_document_component(
+    async def remove_document_component(
+        request: conn_models.DocumentComponentRemovalRequest,
+    ) -> None:
+        await service.remove_document_component(
             paper_id=request.paper_id, component_path=request.component_path
         )
 
@@ -136,7 +138,7 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
         aws_secret_access_key=app_cfg.s3_secret_access_key.get_secret_value(),
     )
 
-    db_client = DocDBClient(s3_client=s3_client, cfg=app_cfg.doc_db_cfg)
+    db_client = DocDBClient.create(s3_client=s3_client, cfg=app_cfg.doc_db_cfg)
 
     service = MainSurveyEnricherService(metrics=Metrics(), db_client=db_client)
 

@@ -5,6 +5,7 @@ component such as TUI or web interface. It orchestrates the operations that are 
 fulfill the designed use cases of the entire application.
 """
 
+import asyncio
 import time
 from functools import cache
 
@@ -33,8 +34,11 @@ class MainSurveyEnricherService:
         self._metrics = metrics
         self._db_client = db_client
 
-    def register_arxiv_survey(self, arxiv_id: str, name: str, description: str) -> None:
+    async def register_arxiv_survey(self, arxiv_id: str, name: str, description: str) -> None:
         """Registers a survey for the given arXiv ID.
+
+        The paper is fetched and parsed in a separate thread, since the parser is synchronous and
+        its HTML parsing is CPU-bound.
 
         Args:
             arxiv_id: The arXiv ID of the paper to register a survey for.
@@ -44,7 +48,7 @@ class MainSurveyEnricherService:
 
         try:
             start = time.perf_counter()
-            document = ArxivParser().parse(arxiv_id)
+            document = await asyncio.to_thread(ArxivParser().parse, arxiv_id)
             end = time.perf_counter()
 
             _logger().info(
@@ -57,10 +61,10 @@ class MainSurveyEnricherService:
             self._metrics.paper_parsing_time.observe(end - start)
 
             start = time.perf_counter()
-            doc_metadata = self._db_client.add_document(
+            doc_metadata = await self._db_client.add_document(
                 document=document, name=name, description=description
             )
-            self._db_client.register_as_survey(paper_id=doc_metadata.paper_id)
+            await self._db_client.register_as_survey(paper_id=doc_metadata.paper_id)
             end = time.perf_counter()
 
             _logger().info(
@@ -99,7 +103,7 @@ class MainSurveyEnricherService:
                 f'Failed to register the survey for the arXiv paper with ID {arxiv_id}: {e}'
             ) from e
 
-    def remove_survey(self, survey_id: str) -> None:
+    async def remove_survey(self, survey_id: str) -> None:
         """Removes a survey with the given survey ID.
 
         Args:
@@ -108,8 +112,8 @@ class MainSurveyEnricherService:
 
         try:
             start = time.perf_counter()
-            survey_metadata = self._db_client.get_survey_info(survey_id)
-            self._db_client.delete_survey(survey_id)
+            survey_metadata = await self._db_client.get_survey_info(survey_id)
+            await self._db_client.delete_survey(survey_id)
             end = time.perf_counter()
 
             _logger().info(
@@ -131,7 +135,7 @@ class MainSurveyEnricherService:
                 f'Failed to remove the survey with ID {survey_id}: {e}'
             ) from e
 
-    def list_surveys(self) -> list[SurveyMetadata]:
+    async def list_surveys(self) -> list[SurveyMetadata]:
         """Lists all registered surveys.
 
         Returns:
@@ -140,7 +144,7 @@ class MainSurveyEnricherService:
 
         try:
             start = time.perf_counter()
-            surveys = self._db_client.get_available_surveys()
+            surveys = await self._db_client.get_available_surveys()
             end = time.perf_counter()
 
             _logger().info(
@@ -159,7 +163,7 @@ class MainSurveyEnricherService:
 
             raise self.MainSurveyEnricherError(f'Failed to list the registered surveys: {e}') from e
 
-    def get_survey_info(self, survey_id: str) -> SurveyMetadata:
+    async def get_survey_info(self, survey_id: str) -> SurveyMetadata:
         """Retrieves information about a specific survey.
 
         Args:
@@ -171,7 +175,7 @@ class MainSurveyEnricherService:
 
         try:
             start = time.perf_counter()
-            survey_info = self._db_client.get_survey_info(survey_id)
+            survey_info = await self._db_client.get_survey_info(survey_id)
             end = time.perf_counter()
 
             _logger().info(
@@ -194,7 +198,9 @@ class MainSurveyEnricherService:
                 f'Failed to retrieve information about the survey with ID {survey_id}: {e}'
             ) from e
 
-    def get_document_details(self, paper_id: str) -> tuple[DocumentMetadata, doc_models.Document]:
+    async def get_document_details(
+        self, paper_id: str
+    ) -> tuple[DocumentMetadata, doc_models.Document]:
         """Retrieves detailed information about a specific document.
 
         Args:
@@ -207,8 +213,8 @@ class MainSurveyEnricherService:
 
         try:
             start = time.perf_counter()
-            metadata = self._db_client.get_document_metadata(paper_id)
-            with self._db_client.get_document_struct_ref(paper_id) as document:
+            metadata = await self._db_client.get_document_metadata(paper_id)
+            async with self._db_client.get_document_struct_ref(paper_id) as document:
                 document = document.model_copy(deep=True)
             end = time.perf_counter()
 
@@ -231,7 +237,7 @@ class MainSurveyEnricherService:
                 f'Failed to retrieve detailed information about the document with ID {paper_id}: {e}'
             ) from e
 
-    def remove_document_component(self, paper_id: str, component_path: str) -> None:
+    async def remove_document_component(self, paper_id: str, component_path: str) -> None:
         """Removes a specific component from a document.
 
         Args:
@@ -241,7 +247,7 @@ class MainSurveyEnricherService:
 
         try:
             start = time.perf_counter()
-            with self._db_client.get_document_struct_ref(paper_id) as document:
+            async with self._db_client.get_document_struct_ref(paper_id) as document:
                 doc_setter = document_manipulators.DocumentSetter(document)
                 doc_setter.remove_component_with_path(component_path)
             end = time.perf_counter()

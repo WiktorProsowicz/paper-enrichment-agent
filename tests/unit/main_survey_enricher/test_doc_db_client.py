@@ -98,29 +98,29 @@ def patch_get_request_fails(monkeypatch):
     )
 
 
-class TestInit:
-    def test_init_skips_creation_for_present_bucket(self, sample_doc_db_cfg):
+class TestCreate:
+    def test_create_skips_creation_for_present_bucket(self, sample_doc_db_cfg):
 
         mock_s3_client = MagicMock()
 
-        DocDBClient(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
+        DocDBClient.create(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
 
         mock_s3_client.head_bucket.assert_called_once_with(Bucket='document-database')
         mock_s3_client.create_bucket.assert_not_called()
 
     @pytest.mark.parametrize('error_code', ['404', 'NoSuchBucket'])
-    def test_init_creates_missing_bucket(self, sample_doc_db_cfg, error_code):
+    def test_create_creates_missing_bucket(self, sample_doc_db_cfg, error_code):
 
         mock_s3_client = MagicMock()
         mock_s3_client.head_bucket.side_effect = BotocoreClientError(
             {'Error': {'Code': error_code}}, 'HeadBucket'
         )
 
-        DocDBClient(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
+        DocDBClient.create(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
 
         mock_s3_client.create_bucket.assert_called_once_with(Bucket='document-database')
 
-    def test_init_raises_when_presence_check_fails(self, sample_doc_db_cfg):
+    def test_create_raises_when_presence_check_fails(self, sample_doc_db_cfg):
 
         mock_s3_client = MagicMock()
         mock_s3_client.head_bucket.side_effect = BotocoreClientError(
@@ -130,11 +130,11 @@ class TestInit:
         with pytest.raises(
             DocDBClient.DocDBClientError, match='Failed to check the presence of the bucket'
         ):
-            DocDBClient(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
+            DocDBClient.create(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
 
         mock_s3_client.create_bucket.assert_not_called()
 
-    def test_init_raises_when_creation_fails(self, sample_doc_db_cfg):
+    def test_create_raises_when_creation_fails(self, sample_doc_db_cfg):
 
         mock_s3_client = MagicMock()
         mock_s3_client.head_bucket.side_effect = BotocoreClientError(
@@ -145,23 +145,25 @@ class TestInit:
         )
 
         with pytest.raises(DocDBClient.DocDBClientError, match='Failed to create the bucket'):
-            DocDBClient(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
+            DocDBClient.create(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
 
 
 class TestDocDBClient:
-    def test_document_exists_returns_true_for_present_document(self, sample_doc_db_cfg):
+    @pytest.mark.asyncio
+    async def test_document_exists_returns_true_for_present_document(self, sample_doc_db_cfg):
 
         mock_s3_client = MagicMock()
 
         doc_db_client = DocDBClient(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
 
-        assert doc_db_client.document_exists(paper_id='sample_paper_id') is True
+        assert await doc_db_client.document_exists(paper_id='sample_paper_id') is True
 
         mock_s3_client.head_object.assert_called_once_with(
             Bucket='document-database', Key='documents/sample_paper_id/metadata.json'
         )
 
-    def test_document_exists_returns_false_for_missing_document(self, sample_doc_db_cfg):
+    @pytest.mark.asyncio
+    async def test_document_exists_returns_false_for_missing_document(self, sample_doc_db_cfg):
 
         mock_s3_client = MagicMock()
         mock_s3_client.head_object.side_effect = BotocoreClientError(
@@ -170,9 +172,10 @@ class TestDocDBClient:
 
         doc_db_client = DocDBClient(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
 
-        assert doc_db_client.document_exists(paper_id='sample_paper_id') is False
+        assert await doc_db_client.document_exists(paper_id='sample_paper_id') is False
 
-    def test_document_exists_raises_when_presence_check_fails(self, sample_doc_db_cfg):
+    @pytest.mark.asyncio
+    async def test_document_exists_raises_when_presence_check_fails(self, sample_doc_db_cfg):
 
         mock_s3_client = MagicMock()
         mock_s3_client.head_object.side_effect = BotocoreClientError(
@@ -184,9 +187,10 @@ class TestDocDBClient:
         with pytest.raises(
             DocDBClient.DocDBClientError, match='Failed to check the presence of the document'
         ):
-            doc_db_client.document_exists(paper_id='sample_paper_id')
+            await doc_db_client.document_exists(paper_id='sample_paper_id')
 
-    def test_add_document_raises_when_download_request_fails(
+    @pytest.mark.asyncio
+    async def test_add_document_raises_when_download_request_fails(
         self, sample_doc_db_cfg, sample_document, patch_get_request_fails
     ):
 
@@ -194,13 +198,14 @@ class TestDocDBClient:
         doc_db_client = DocDBClient(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
 
         with pytest.raises(DocDBClient.DocDBClientError, match='Failed to download image from'):
-            doc_db_client.add_document(
+            await doc_db_client.add_document(
                 document=sample_document, name='Sample Document', description='Sample Description'
             )
 
         assert mock_s3_client.upload_fileobj.call_count == 0
 
-    def test_add_document_raises_when_upload_fails(
+    @pytest.mark.asyncio
+    async def test_add_document_raises_when_upload_fails(
         self, sample_doc_db_cfg, sample_document, patch_get_request
     ):
 
@@ -212,18 +217,19 @@ class TestDocDBClient:
         with pytest.raises(
             DocDBClient.DocDBClientError, match='Failed to upload image to database'
         ):
-            doc_db_client.add_document(
+            await doc_db_client.add_document(
                 document=sample_document, name='Sample Document', description='Sample Description'
             )
 
         assert mock_s3_client.upload_fileobj.call_count == 2
 
-    def test_add_document_successful(self, sample_doc_db_cfg, sample_document, patch_get_request):
+    @pytest.mark.asyncio
+    async def test_add_document_successful(self, sample_doc_db_cfg, sample_document, patch_get_request):
 
         mock_s3_client = MagicMock()
 
         doc_db_client = DocDBClient(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
-        doc_meta = doc_db_client.add_document(
+        doc_meta = await doc_db_client.add_document(
             document=sample_document, name='Sample Document', description='Sample Description'
         )
 
@@ -236,12 +242,13 @@ class TestDocDBClient:
             f'documents/{doc_meta.paper_id}/document.json',
         ]
 
-    def test_register_as_survey_successful(self, sample_doc_db_cfg):
+    @pytest.mark.asyncio
+    async def test_register_as_survey_successful(self, sample_doc_db_cfg):
 
         mock_s3_client = MagicMock()
 
         doc_db_client = DocDBClient(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
-        survey_meta = doc_db_client.register_as_survey(paper_id='sample_paper_id')
+        survey_meta = await doc_db_client.register_as_survey(paper_id='sample_paper_id')
 
         assert survey_meta.paper_id == 'sample_paper_id'
         assert survey_meta.referenced_docs == {}
@@ -252,17 +259,19 @@ class TestDocDBClient:
         )
 
     @pytest.mark.parametrize('list_response', [{'CommonPrefixes': []}, {'KeyCount': 0}])
-    def test_get_available_surveys_returns_empty_list(self, sample_doc_db_cfg, list_response):
+    @pytest.mark.asyncio
+    async def test_get_available_surveys_returns_empty_list(self, sample_doc_db_cfg, list_response):
 
         mock_s3_client = MagicMock()
         mock_s3_client.list_objects_v2.return_value = list_response
 
         doc_db_client = DocDBClient(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
 
-        assert doc_db_client.get_available_surveys() == []
+        assert await doc_db_client.get_available_surveys() == []
         assert mock_s3_client.get_object.call_count == 0
 
-    def test_get_available_surveys_returns_surveys(
+    @pytest.mark.asyncio
+    async def test_get_available_surveys_returns_surveys(
         self, sample_doc_db_cfg, sample_survey_metadatas
     ):
 
@@ -294,9 +303,10 @@ class TestDocDBClient:
 
         doc_db_client = DocDBClient(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
 
-        assert len(doc_db_client.get_available_surveys()) == 2
+        assert len(await doc_db_client.get_available_surveys()) == 2
 
-    def test_get_available_surveys_raises_on_list_failure(self, sample_doc_db_cfg):
+    @pytest.mark.asyncio
+    async def test_get_available_surveys_raises_on_list_failure(self, sample_doc_db_cfg):
 
         mock_s3_client = MagicMock()
         mock_s3_client.list_objects_v2.side_effect = BotocoreClientError(
@@ -308,9 +318,10 @@ class TestDocDBClient:
         with pytest.raises(
             DocDBClient.DocDBClientError, match='Failed to list surveys in database'
         ):
-            doc_db_client.get_available_surveys()
+            await doc_db_client.get_available_surveys()
 
-    def test_get_survey_info_returns_metadata(self, sample_doc_db_cfg, sample_survey_metadatas):
+    @pytest.mark.asyncio
+    async def test_get_survey_info_returns_metadata(self, sample_doc_db_cfg, sample_survey_metadatas):
 
         def mock_get_object(**kwargs):
             yield {
@@ -324,13 +335,14 @@ class TestDocDBClient:
 
         doc_db_client = DocDBClient(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
 
-        assert doc_db_client.get_survey_info('sample_paper_id_1') == sample_survey_metadatas[0]
+        assert await doc_db_client.get_survey_info('sample_paper_id_1') == sample_survey_metadatas[0]
 
         mock_s3_client.get_object.assert_called_once_with(
             Bucket='document-database', Key='surveys/sample_paper_id_1/metadata.json'
         )
 
-    def test_get_survey_info_raises_on_retrieval_failure(self, sample_doc_db_cfg):
+    @pytest.mark.asyncio
+    async def test_get_survey_info_raises_on_retrieval_failure(self, sample_doc_db_cfg):
 
         mock_s3_client = MagicMock()
         mock_s3_client.get_object.side_effect = BotocoreClientError(
@@ -342,9 +354,10 @@ class TestDocDBClient:
         with pytest.raises(
             DocDBClient.DocDBClientError, match='Failed to retrieve JSON from database at'
         ):
-            doc_db_client.get_survey_info('sample_paper_id')
+            await doc_db_client.get_survey_info('sample_paper_id')
 
-    def test_add_referenced_document_successful(self, sample_doc_db_cfg):
+    @pytest.mark.asyncio
+    async def test_add_referenced_document_successful(self, sample_doc_db_cfg):
 
         def mock_get_object(**kwargs):
             yield {
@@ -360,7 +373,7 @@ class TestDocDBClient:
 
         doc_db_client = DocDBClient(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
 
-        doc_db_client.add_referenced_document(
+        await doc_db_client.add_referenced_document(
             survey_id='survey_id', reference_id='ref1', referenced_paper_id='ref_id'
         )
 
@@ -377,7 +390,8 @@ class TestDocDBClient:
             ).encode('utf-8'),
         )
 
-    def test_delete_survey_successful(self, sample_doc_db_cfg):
+    @pytest.mark.asyncio
+    async def test_delete_survey_successful(self, sample_doc_db_cfg):
 
         def mock_get_object(**kwargs):
             yield {
@@ -406,7 +420,7 @@ class TestDocDBClient:
 
         doc_db_client = DocDBClient(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
 
-        doc_db_client.delete_survey('survey_id')
+        await doc_db_client.delete_survey('survey_id')
 
         deleted_keys = [call.kwargs['Key'] for call in mock_s3_client.delete_object.call_args_list]
         assert deleted_keys == [
@@ -420,7 +434,8 @@ class TestDocDBClient:
             'documents/survey_id/images/image3.png',
         ]
 
-    def test_get_document_struct_ref_synchronizes_properly(
+    @pytest.mark.asyncio
+    async def test_get_document_struct_ref_synchronizes_properly(
         self, sample_doc_db_cfg, sample_document
     ):
 
@@ -433,7 +448,7 @@ class TestDocDBClient:
 
         doc_db_client = DocDBClient(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
 
-        with doc_db_client.get_document_struct_ref('sample_paper_id') as doc_struct_ref:
+        async with doc_db_client.get_document_struct_ref('sample_paper_id') as doc_struct_ref:
             doc_struct_ref.sections.clear()
 
         assert (
@@ -447,7 +462,8 @@ class TestDocDBClient:
             == []
         )
 
-    def test_get_document_metadata_returns_correct_metadata(self, sample_doc_db_cfg):
+    @pytest.mark.asyncio
+    async def test_get_document_metadata_returns_correct_metadata(self, sample_doc_db_cfg):
 
         def mock_get_object(**kwargs):
 
@@ -471,7 +487,7 @@ class TestDocDBClient:
         mock_s3_client.get_object.side_effect = mock_get_object()
 
         doc_db_client = DocDBClient(s3_client=mock_s3_client, cfg=sample_doc_db_cfg)
-        metadata = doc_db_client.get_document_metadata('sample_paper_id')
+        metadata = await doc_db_client.get_document_metadata('sample_paper_id')
 
         assert metadata.paper_id == 'sample_paper_id'
         assert metadata.name == 'Sample Document'
