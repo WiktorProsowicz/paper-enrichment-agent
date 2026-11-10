@@ -252,6 +252,18 @@ class TestArxivParser:
             == 'https://ar5iv.labs.arxiv.org/html/1409.0473/assets/rnnsearch.svg'
         )
 
+    @pytest.mark.parametrize('figure_path', ['/sections/S3/S3.F1', '/sections/Sx1/Sx1.F3'])
+    def test_does_not_assign_figure_caption_to_subfigure(self, mock_example_paper, figure_path):
+
+        document = ArxivParser().parse(EXAMPLE_PAPER_3)
+
+        figure = DocumentGetter(document).get_component_by_path(figure_path)
+
+        assert isinstance(figure, doc_models.Figure)
+        assert figure.caption.startswith('Figure ')
+        assert len(figure.subfigures) == 1
+        assert figure.subfigures[0].caption is None
+
     def test_parses_figures_nested_in_uncaptioned_figure_separately(self, mock_example_paper):
 
         document = ArxivParser().parse(EXAMPLE_PAPER_6)
