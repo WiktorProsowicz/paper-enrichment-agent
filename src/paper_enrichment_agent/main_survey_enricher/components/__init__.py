@@ -1,6 +1,6 @@
-from . import arxiv_parser, doc_db_client
+from . import arxiv_parser, db_clients
 
 __all__ = [
     'arxiv_parser',
-    'doc_db_client',
+    'db_clients',
 ]

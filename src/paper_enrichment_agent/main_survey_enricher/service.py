@@ -15,7 +15,9 @@ from paper_enrichment_agent.common import document_manipulators, logging_setup
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models.misc import DocumentMetadata, SurveyMetadata
 from paper_enrichment_agent.main_survey_enricher.components.arxiv_parser import ArxivParser
-from paper_enrichment_agent.main_survey_enricher.components.doc_db_client import DocDBClient
+from paper_enrichment_agent.main_survey_enricher.components.db_clients.doc_db_client import (
+    DocDBClient,
+)
 
 
 @cache

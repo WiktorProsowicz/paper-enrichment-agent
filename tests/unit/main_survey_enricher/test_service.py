@@ -5,7 +5,9 @@ import pytest
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models.misc import DocumentMetadata, SurveyMetadata
 from paper_enrichment_agent.main_survey_enricher.components.arxiv_parser import ArxivParser
-from paper_enrichment_agent.main_survey_enricher.components.doc_db_client import DocDBClient
+from paper_enrichment_agent.main_survey_enricher.components.db_clients.doc_db_client import (
+    DocDBClient,
+)
 from paper_enrichment_agent.main_survey_enricher.service import MainSurveyEnricherService
 
 SAMPLE_ARXIV_ID = '1905.09263'
@@ -161,7 +163,9 @@ class TestRegisterArxivSurvey:
         mock_db_client.register_as_survey.assert_called_once_with(paper_id='sample_paper_id')
 
     @pytest.mark.asyncio
-    async def test_reports_metrics_on_success(self, patch_arxiv_parser, mock_metrics, mock_db_client):
+    async def test_reports_metrics_on_success(
+        self, patch_arxiv_parser, mock_metrics, mock_db_client
+    ):
 
         service = MainSurveyEnricherService(metrics=mock_metrics, db_client=mock_db_client)
         await service.register_arxiv_survey(
@@ -470,13 +474,15 @@ class TestGetDocumentDetails:
             description=SAMPLE_DESCRIPTION,
             images={},
         )
-        db_client.get_document_struct_ref.return_value.__aenter__.return_value = doc_models.Document(
-            title='Sample Document',
-            abstract='This is a sample abstract.',
-            description='This is a sample description.',
-            sections=[],
-            footnotes=[],
-            referenced_papers=[],
+        db_client.get_document_struct_ref.return_value.__aenter__.return_value = (
+            doc_models.Document(
+                title='Sample Document',
+                abstract='This is a sample abstract.',
+                description='This is a sample description.',
+                sections=[],
+                footnotes=[],
+                referenced_papers=[],
+            )
         )
         return db_client
 
@@ -498,24 +504,28 @@ class TestRemoveDocumentComponent:
     def mock_db_client(self) -> MagicMock:
 
         db_client = MagicMock(spec=DocDBClient)
-        db_client.get_document_struct_ref.return_value.__aenter__.return_value = doc_models.Document(
-            title='Sample Document',
-            abstract='This is a sample abstract.',
-            description='This is a sample description.',
-            sections=[
-                doc_models.Section(
-                    component_id='section1',
-                    title='Introduction',
-                    components=[
-                        doc_models.Paragraph(
-                            component_id='paragraph1',
-                            elements=['This is a sample paragraph in the introduction section.'],
-                        )
-                    ],
-                )
-            ],
-            footnotes=[],
-            referenced_papers=[],
+        db_client.get_document_struct_ref.return_value.__aenter__.return_value = (
+            doc_models.Document(
+                title='Sample Document',
+                abstract='This is a sample abstract.',
+                description='This is a sample description.',
+                sections=[
+                    doc_models.Section(
+                        component_id='section1',
+                        title='Introduction',
+                        components=[
+                            doc_models.Paragraph(
+                                component_id='paragraph1',
+                                elements=[
+                                    'This is a sample paragraph in the introduction section.'
+                                ],
+                            )
+                        ],
+                    )
+                ],
+                footnotes=[],
+                referenced_papers=[],
+            )
         )
         return db_client
 

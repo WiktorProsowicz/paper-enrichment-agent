@@ -21,7 +21,10 @@ from pydantic import Field
 from paper_enrichment_agent.common import logging_setup
 from paper_enrichment_agent.common.models import misc as misc_models
 from paper_enrichment_agent.common.models import service_conn as conn_models
-from paper_enrichment_agent.main_survey_enricher.components.doc_db_client import DocDBClient
+from paper_enrichment_agent.main_survey_enricher.components.db_clients.core import S3DBClient
+from paper_enrichment_agent.main_survey_enricher.components.db_clients.doc_db_client import (
+    DocDBClient,
+)
 from paper_enrichment_agent.main_survey_enricher.service import MainSurveyEnricherService, Metrics
 
 
@@ -51,9 +54,15 @@ class AppCfg(pydantic.BaseModel):
         pydantic.SecretStr,
         Field(description='The secret access key for the document database.', min_length=1),
     ]
-    doc_db_cfg: Annotated[
-        DocDBClient.Configuration,
-        Field(description='Configuration of the document database client.'),
+    doc_db_bucket_name: Annotated[
+        str,
+        Field(
+            description=(
+                'The name of the S3 bucket storing the document database. Must be a valid S3 '
+                'bucket name, i.e. lowercase letters, digits, dots and hyphens only.'
+            ),
+            min_length=3,
+        ),
     ]
 
 
@@ -138,7 +147,8 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
         aws_secret_access_key=app_cfg.s3_secret_access_key.get_secret_value(),
     )
 
-    db_client = DocDBClient.create(s3_client=s3_client, cfg=app_cfg.doc_db_cfg)
+    doc_db_storage = S3DBClient.create(s3_client=s3_client, bucket_name=app_cfg.doc_db_bucket_name)
+    db_client = DocDBClient(db_client=doc_db_storage)
 
     service = MainSurveyEnricherService(metrics=Metrics(), db_client=db_client)
 
