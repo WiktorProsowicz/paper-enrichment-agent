@@ -470,3 +470,34 @@ class TestGetDocumentMetadata:
         mock_db_client.get_model.assert_awaited_once_with(
             path='documents/sample_paper_id/metadata.json', model_type=DocumentMetadata
         )
+
+
+class TestDownloadImage:
+    @pytest.mark.asyncio
+    async def test_downloads_image_to_local_file(self, doc_db_client, mock_db_client, tmp_path):
+
+        local_path = tmp_path / 'image.png'
+
+        await doc_db_client.download_image('documents/p/images/img.png', local_path)
+
+        mock_db_client.download_to_file.assert_awaited_once_with(
+            path='documents/p/images/img.png', local_path=local_path
+        )
+
+    @pytest.mark.asyncio
+    async def test_raises_when_download_fails(self, doc_db_client, mock_db_client, tmp_path):
+
+        mock_db_client.download_to_file.side_effect = DBClientException('Missing object')
+
+        with pytest.raises(DocDBClient.DocDBClientError, match='Failed to download the image'):
+            await doc_db_client.download_image('documents/p/images/img.png', tmp_path / 'i.png')
+
+    @pytest.mark.asyncio
+    async def test_does_not_swallow_unexpected_errors(
+        self, doc_db_client, mock_db_client, tmp_path
+    ):
+
+        mock_db_client.download_to_file.side_effect = RuntimeError('Unexpected')
+
+        with pytest.raises(RuntimeError, match='Unexpected'):
+            await doc_db_client.download_image('documents/p/images/img.png', tmp_path / 'i.png')

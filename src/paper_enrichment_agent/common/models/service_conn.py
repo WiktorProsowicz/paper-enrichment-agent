@@ -12,7 +12,7 @@ import pydantic
 from pydantic import Field
 
 from paper_enrichment_agent.common.models import document as doc_models
-from paper_enrichment_agent.common.models.misc import DocumentMetadata
+from paper_enrichment_agent.common.models.misc import DocumentMetadata, SerializedDocFormat
 
 
 class FootnoteEnrichmentRequest(pydantic.BaseModel):
@@ -99,3 +99,12 @@ class DocumentDetailsResponse(pydantic.BaseModel):
 
     metadata: Annotated[DocumentMetadata, Field(description='The metadata of the document.')]
     document: Annotated[doc_models.Document, Field(description='The structure of the document.')]
+
+
+class DocumentRenderingRequest(pydantic.BaseModel):
+    """Contains request data for serializing a document and storing the result in the database."""
+
+    paper_id: Annotated[str, Field(description='The ID of the document to render.', min_length=1)]
+    doc_format: Annotated[
+        SerializedDocFormat, Field(description='The format to render the document into.')
+    ]

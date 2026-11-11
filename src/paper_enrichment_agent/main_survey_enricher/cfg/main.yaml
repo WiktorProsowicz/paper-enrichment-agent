@@ -8,3 +8,4 @@ s3_region: us-east-1
 s3_access_key_id: ''
 s3_secret_access_key: ''
 doc_db_bucket_name: document-database
+rendered_db_bucket_name: rendered-documents

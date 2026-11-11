@@ -6,6 +6,8 @@ fulfill the designed use cases of the entire application.
 """
 
 import asyncio
+import pathlib
+import tempfile
 import time
 from functools import cache
 
@@ -13,10 +15,24 @@ from prometheus_client import Counter, Gauge, Summary
 
 from paper_enrichment_agent.common import document_manipulators, logging_setup
 from paper_enrichment_agent.common.models import document as doc_models
-from paper_enrichment_agent.common.models.misc import DocumentMetadata, SurveyMetadata
+from paper_enrichment_agent.common.models.misc import (
+    DocumentMetadata,
+    RenderedDocumentMetadata,
+    SerializedDocFormat,
+    SurveyMetadata,
+)
 from paper_enrichment_agent.main_survey_enricher.components.arxiv_parser import ArxivParser
+from paper_enrichment_agent.main_survey_enricher.components.db_clients import (
+    rendered_doc_db_client,
+)
 from paper_enrichment_agent.main_survey_enricher.components.db_clients.doc_db_client import (
     DocDBClient,
+)
+from paper_enrichment_agent.main_survey_enricher.components.doc_serializers.core import (
+    SerializationEnvironment,
+)
+from paper_enrichment_agent.main_survey_enricher.components.doc_serializers.markdown import (
+    MarkdownSerializer,
 )
 
 
@@ -31,10 +47,19 @@ class MainSurveyEnricherService:
     class MainSurveyEnricherError(Exception):
         """Base class for exceptions raised by the `main_survey_enricher` service."""
 
-    def __init__(self, metrics: 'Metrics', db_client: DocDBClient) -> None:
+    # Formats `render_document` has a serializer for.
+    _SUPPORTED_RENDERING_FORMATS = (SerializedDocFormat.MARKDOWN,)
+
+    def __init__(
+        self,
+        metrics: 'Metrics',
+        doc_db_client: DocDBClient,
+        rendered_doc_db_client: rendered_doc_db_client.RenderedDocDBClient,
+    ) -> None:
 
         self._metrics = metrics
-        self._db_client = db_client
+        self._doc_db_client = doc_db_client
+        self._rendered_doc_db_client = rendered_doc_db_client
 
     async def register_arxiv_survey(self, arxiv_id: str, name: str, description: str) -> None:
         """Registers a survey for the given arXiv ID.
@@ -63,10 +88,10 @@ class MainSurveyEnricherService:
             self._metrics.paper_parsing_time.observe(end - start)
 
             start = time.perf_counter()
-            doc_metadata = await self._db_client.add_document(
+            doc_metadata = await self._doc_db_client.add_document(
                 document=document, name=name, description=description
             )
-            await self._db_client.register_as_survey(paper_id=doc_metadata.paper_id)
+            await self._doc_db_client.register_as_survey(paper_id=doc_metadata.paper_id)
             end = time.perf_counter()
 
             _logger().info(
@@ -114,8 +139,8 @@ class MainSurveyEnricherService:
 
         try:
             start = time.perf_counter()
-            survey_metadata = await self._db_client.get_survey_info(survey_id)
-            await self._db_client.delete_survey(survey_id)
+            survey_metadata = await self._doc_db_client.get_survey_info(survey_id)
+            await self._doc_db_client.delete_survey(survey_id)
             end = time.perf_counter()
 
             _logger().info(
@@ -146,7 +171,7 @@ class MainSurveyEnricherService:
 
         try:
             start = time.perf_counter()
-            surveys = await self._db_client.get_available_surveys()
+            surveys = await self._doc_db_client.get_available_surveys()
             end = time.perf_counter()
 
             _logger().info(
@@ -177,7 +202,7 @@ class MainSurveyEnricherService:
 
         try:
             start = time.perf_counter()
-            survey_info = await self._db_client.get_survey_info(survey_id)
+            survey_info = await self._doc_db_client.get_survey_info(survey_id)
             end = time.perf_counter()
 
             _logger().info(
@@ -215,8 +240,8 @@ class MainSurveyEnricherService:
 
         try:
             start = time.perf_counter()
-            metadata = await self._db_client.get_document_metadata(paper_id)
-            async with self._db_client.get_document_struct_ref(paper_id) as document:
+            metadata = await self._doc_db_client.get_document_metadata(paper_id)
+            async with self._doc_db_client.get_document_struct_ref(paper_id) as document:
                 document = document.model_copy(deep=True)
             end = time.perf_counter()
 
@@ -249,7 +274,7 @@ class MainSurveyEnricherService:
 
         try:
             start = time.perf_counter()
-            async with self._db_client.get_document_struct_ref(paper_id) as document:
+            async with self._doc_db_client.get_document_struct_ref(paper_id) as document:
                 doc_setter = document_manipulators.DocumentSetter(document)
                 doc_setter.remove_component_with_path(component_path)
             end = time.perf_counter()
@@ -272,6 +297,187 @@ class MainSurveyEnricherService:
             raise self.MainSurveyEnricherError(
                 f'Failed to remove component "{component_path}" from the document {paper_id}: {e}'
             ) from e
+
+    async def render_document(
+        self, paper_id: str, doc_format: SerializedDocFormat
+    ) -> RenderedDocumentMetadata:
+        """Serializes a document into the given format and stores the result in the database.
+
+        The document and its images are fetched into a temporary directory, where the serializer
+        creates the archive. The serialization runs in a separate thread, since it is bound to the
+        CPU and the file system. The previous rendering in the same format, if any, is replaced.
+
+        Args:
+            paper_id: The ID of the document to render.
+            doc_format: The format to render the document into.
+
+        Returns:
+            The metadata of the stored rendered document.
+        """
+
+        if doc_format not in self._SUPPORTED_RENDERING_FORMATS:
+            _logger().error(
+                'Unsupported rendering format.', paper_id=paper_id, doc_format=doc_format
+            )
+
+            raise self.MainSurveyEnricherError(
+                f'Failed to render the document {paper_id}: unsupported format {doc_format}.'
+            )
+
+        try:
+            start = time.perf_counter()
+            metadata = await self._doc_db_client.get_document_metadata(paper_id)
+            async with self._doc_db_client.get_document_struct_ref(paper_id) as document:
+                document = document.model_copy(deep=True)
+
+            with tempfile.TemporaryDirectory() as work_dir:
+                environment = await asyncio.to_thread(
+                    SerializationEnvironment.create, document, pathlib.Path(work_dir)
+                )
+                await self._place_images(environment=environment, metadata=metadata)
+
+                if doc_format == SerializedDocFormat.MARKDOWN:
+                    serializer = MarkdownSerializer(environment)
+
+                archive_path = await asyncio.to_thread(serializer.serialize)
+
+                rendered_metadata = await self._rendered_doc_db_client.add_rendered_document(
+                    paper_id=paper_id, doc_format=doc_format, archive_path=archive_path
+                )
+            end = time.perf_counter()
+
+            _logger().info(
+                'Successfully rendered the document.',
+                paper_id=paper_id,
+                doc_format=doc_format,
+                size_bytes=rendered_metadata.size_bytes,
+            )
+            self._metrics.documents_rendered.labels(format=doc_format, status='success').inc()
+            self._metrics.document_rendering_time.observe(end - start)
+
+            return rendered_metadata
+
+        except (
+            DocDBClient.DocDBClientError,
+            rendered_doc_db_client.RenderedDocDBClient.RenderedDocDBClientError,
+            SerializationEnvironment.SerializationEnvironmentError,
+            MarkdownSerializer.SerializationError,
+            ValueError,
+        ) as e:
+            _logger().error(
+                'Failed to render the document.',
+                paper_id=paper_id,
+                doc_format=doc_format,
+                error=str(e),
+            )
+            self._metrics.documents_rendered.labels(format=doc_format, status='failure').inc()
+
+            raise self.MainSurveyEnricherError(
+                f'Failed to render the document {paper_id} into {doc_format}: {e}'
+            ) from e
+
+    async def list_rendered_documents(
+        self, paper_id: str | None = None
+    ) -> list[RenderedDocumentMetadata]:
+        """Lists the rendered documents.
+
+        Args:
+            paper_id: If given, only the renderings of this document are listed.
+
+        Returns:
+            The metadata of the matching rendered documents.
+        """
+
+        try:
+            start = time.perf_counter()
+            rendered_docs = await self._rendered_doc_db_client.list_rendered_documents(paper_id)
+            end = time.perf_counter()
+
+            _logger().info(
+                'Successfully listed the rendered documents.',
+                paper_id=paper_id,
+                num_rendered_docs=len(rendered_docs),
+            )
+            self._metrics.doc_db_operations_time.observe(end - start)
+
+            return rendered_docs
+
+        except rendered_doc_db_client.RenderedDocDBClient.RenderedDocDBClientError as e:
+            _logger().error(
+                'Failed to list the rendered documents.', paper_id=paper_id, error=str(e)
+            )
+
+            raise self.MainSurveyEnricherError(f'Failed to list the rendered documents: {e}') from e
+
+    async def download_rendered_document(
+        self, paper_id: str, doc_format: SerializedDocFormat, local_path: pathlib.Path
+    ) -> None:
+        """Downloads the archive of a rendered document to a local file.
+
+        The file is written on the host running the service. The document must have been rendered
+        into the given format beforehand, see `render_document`.
+
+        Args:
+            paper_id: The ID of the rendered document.
+            doc_format: The format of the rendering.
+            local_path: The path of the local file to be written. Its parent directory must exist.
+        """
+
+        try:
+            start = time.perf_counter()
+            if not await self._rendered_doc_db_client.rendered_document_exists(
+                paper_id, doc_format
+            ):
+                raise ValueError(f'The document has not been rendered into {doc_format} yet.')
+
+            await self._rendered_doc_db_client.download_rendered_document(
+                paper_id=paper_id, doc_format=doc_format, local_path=local_path
+            )
+            end = time.perf_counter()
+
+            _logger().info(
+                'Successfully downloaded the rendered document.',
+                paper_id=paper_id,
+                doc_format=doc_format,
+                local_path=str(local_path),
+            )
+            self._metrics.doc_db_operations_time.observe(end - start)
+
+        except (
+            rendered_doc_db_client.RenderedDocDBClient.RenderedDocDBClientError,
+            ValueError,
+        ) as e:
+            _logger().error(
+                'Failed to download the rendered document.',
+                paper_id=paper_id,
+                doc_format=doc_format,
+                error=str(e),
+            )
+
+            raise self.MainSurveyEnricherError(
+                f'Failed to download the {doc_format} rendering of document {paper_id}: {e}'
+            ) from e
+
+    async def _place_images(
+        self, environment: SerializationEnvironment, metadata: DocumentMetadata
+    ) -> None:
+        """Downloads the document's stored images to the paths given by the environment.
+
+        Raises:
+            ValueError: If an image subfigure of the document has no stored image.
+        """
+
+        for component_path in environment.image_component_paths:
+            if component_path not in metadata.images:
+                raise ValueError(
+                    f'The image of component {component_path} is missing in the metadata of '
+                    f'document {metadata.paper_id}.'
+                )
+
+            await self._doc_db_client.download_image(
+                image_db_path=metadata.images[component_path],
+                local_path=environment.image_path_for_component(component_path),
+            )
 
 
 class Metrics:
@@ -327,7 +533,24 @@ class Metrics:
             namespace='main_survey_enricher',
         )
 
+        self.documents_rendered = Counter(
+            'documents_rendered',
+            'Number of documents rendered (serialized) by the system.',
+            labelnames=['format', 'status'],  # status can be 'success' or 'failure'
+            namespace='main_survey_enricher',
+        )
+
+        self.document_rendering_time = Summary(
+            'document_rendering_time',
+            'Time spent on successful rendering of documents, including the database transfers.',
+            namespace='main_survey_enricher',
+        )
+
         self.papers_added.labels(source='arxiv')
+
+        for doc_format in SerializedDocFormat:
+            for status in ('success', 'failure'):
+                self.documents_rendered.labels(format=doc_format, status=status)
 
         for status in ('success', 'failure'):
             self.papers_parsed.labels(source='arxiv', status=status)

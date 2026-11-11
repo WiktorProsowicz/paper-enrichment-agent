@@ -10,6 +10,7 @@ Exported classes:
 
 import asyncio
 import contextlib
+import pathlib
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -243,6 +244,23 @@ class DocDBClient:
         return await self._get_model(
             path=f'documents/{paper_id}/metadata.json', model_type=DocumentMetadata
         )
+
+    async def download_image(self, image_db_path: str, local_path: pathlib.Path) -> None:
+        """Downloads a stored image of a document to a local file.
+
+        Args:
+            image_db_path: The path of the image in the database, as given by the document's
+                metadata (see :attr:`DocumentMetadata.images`).
+            local_path: The path of the local file to be written. Its parent directory must exist.
+        """
+
+        try:
+            await self._db_client.download_to_file(path=image_db_path, local_path=local_path)
+
+        except core.DBClientException as e:
+            raise self.DocDBClientError(
+                f'Failed to download the image {image_db_path} to {local_path}: {e}'
+            ) from e
 
     async def _get_model[T: pydantic.BaseModel](self, path: str, model_type: type[T]) -> T:
         """Retrieves a model from the database, wrapping the errors."""

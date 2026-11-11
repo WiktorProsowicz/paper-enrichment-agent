@@ -7,6 +7,8 @@ document database, whose connection is configured via `AppCfg`.
 
 import functools
 import pathlib
+import shutil
+import tempfile
 from typing import Annotated
 
 import boto3
@@ -17,10 +19,14 @@ import prometheus_client
 import pydantic
 import uvicorn
 from pydantic import Field
+from starlette.background import BackgroundTask
 
 from paper_enrichment_agent.common import logging_setup
 from paper_enrichment_agent.common.models import misc as misc_models
 from paper_enrichment_agent.common.models import service_conn as conn_models
+from paper_enrichment_agent.main_survey_enricher.components.db_clients import (
+    rendered_doc_db_client,
+)
 from paper_enrichment_agent.main_survey_enricher.components.db_clients.core import S3DBClient
 from paper_enrichment_agent.main_survey_enricher.components.db_clients.doc_db_client import (
     DocDBClient,
@@ -64,6 +70,16 @@ class AppCfg(pydantic.BaseModel):
             min_length=3,
         ),
     ]
+    rendered_db_bucket_name: Annotated[
+        str,
+        Field(
+            description=(
+                'The name of the S3 bucket storing the rendered (serialized) documents. Must be a '
+                'valid S3 bucket name, i.e. lowercase letters, digits, dots and hyphens only.'
+            ),
+            min_length=3,
+        ),
+    ]
 
 
 def create_app(service: MainSurveyEnricherService) -> fastapi.FastAPI:
@@ -73,7 +89,8 @@ def create_app(service: MainSurveyEnricherService) -> fastapi.FastAPI:
     endpoints use GET with query parameters, while the modifying ones use POST with a JSON body.
     The route handlers are asynchronous, since the service offloads its blocking operations to
     separate threads. Service errors are returned as HTTP 500 responses with the error message in
-    the `detail` field.
+    the `detail` field. Rendered documents are downloaded as a file transfer: the archive is
+    returned as an `application/zip` attachment.
 
     Args:
         service: The service handling the requests.
@@ -127,6 +144,44 @@ def create_app(service: MainSurveyEnricherService) -> fastapi.FastAPI:
             paper_id=request.paper_id, component_path=request.component_path
         )
 
+    @app.post('/render_document')
+    async def render_document(
+        request: conn_models.DocumentRenderingRequest,
+    ) -> misc_models.RenderedDocumentMetadata:
+        return await service.render_document(
+            paper_id=request.paper_id, doc_format=request.doc_format
+        )
+
+    @app.get('/list_rendered_documents')
+    async def list_rendered_documents(
+        paper_id: str | None = None,
+    ) -> list[misc_models.RenderedDocumentMetadata]:
+        return await service.list_rendered_documents(paper_id)
+
+    @app.get('/download_rendered_document', response_class=fastapi.responses.FileResponse)
+    async def download_rendered_document(
+        paper_id: str, doc_format: misc_models.SerializedDocFormat
+    ) -> fastapi.responses.FileResponse:
+        # The archive is staged in a temporary directory, removed once the response is sent.
+        download_dir = pathlib.Path(tempfile.mkdtemp())
+        local_path = download_dir / f'{paper_id}_{doc_format}.zip'
+
+        try:
+            await service.download_rendered_document(
+                paper_id=paper_id, doc_format=doc_format, local_path=local_path
+            )
+
+        except BaseException:
+            shutil.rmtree(download_dir, ignore_errors=True)
+            raise
+
+        return fastapi.responses.FileResponse(
+            local_path,
+            media_type='application/zip',
+            filename=local_path.name,
+            background=BackgroundTask(shutil.rmtree, download_dir, ignore_errors=True),
+        )
+
     return app
 
 
@@ -147,10 +202,18 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
         aws_secret_access_key=app_cfg.s3_secret_access_key.get_secret_value(),
     )
 
-    doc_db_storage = S3DBClient.create(s3_client=s3_client, bucket_name=app_cfg.doc_db_bucket_name)
-    db_client = DocDBClient(db_client=doc_db_storage)
+    doc_db_client = DocDBClient(
+        db_client=S3DBClient.create(s3_client=s3_client, bucket_name=app_cfg.doc_db_bucket_name)
+    )
+    rendered_db_client = rendered_doc_db_client.RenderedDocDBClient(
+        db_client=S3DBClient.create(
+            s3_client=s3_client, bucket_name=app_cfg.rendered_db_bucket_name
+        )
+    )
 
-    service = MainSurveyEnricherService(metrics=Metrics(), db_client=db_client)
+    service = MainSurveyEnricherService(
+        metrics=Metrics(), doc_db_client=doc_db_client, rendered_doc_db_client=rendered_db_client
+    )
 
     app = create_app(service=service)
 

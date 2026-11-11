@@ -171,11 +171,38 @@
       "options": {"colorMode": "value", "graphMode": "area", "textMode": "value", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
     },
     {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Documents rendered by status",
+      "description": "Document renderings (serializations) per output format and status, per interval.",
+      "gridPos": {"x": 0, "y": 26, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "interval": "1m",
+      "targets": [
+        {"refId": "A", "expr": "sum by (format, status) (increase(main_survey_enricher_documents_rendered_total[$__interval]))", "legendFormat": "{{format}} / {{status}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "custom": {"drawStyle": "bars", "fillOpacity": 70}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Mean document rendering time",
+      "description": "Mean duration of successful renderings (including the database transfers) over a 5-minute window.",
+      "gridPos": {"x": 12, "y": 26, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "rate(main_survey_enricher_document_rendering_time_sum[5m]) / rate(main_survey_enricher_document_rendering_time_count[5m])", "legendFormat": "mean"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s", "min": 0, "custom": {"fillOpacity": 10, "spanNulls": true}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
       "id": 11,
       "type": "logs",
       "title": "Logs",
       "description": "Log lines of the main_survey_enricher service, newest at the bottom. Expand a line to see its JSON fields. Use the Service Logs dashboard to filter by level or regex.",
-      "gridPos": {"x": 0, "y": 26, "w": 24, "h": 14},
+      "gridPos": {"x": 0, "y": 34, "w": 24, "h": 14},
       "datasource": {"type": "loki", "uid": "loki"},
       "targets": [
         {"refId": "A", "expr": "{service=\"main_survey_enricher\"}", "queryType": "range"}
