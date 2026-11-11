@@ -4,6 +4,8 @@ The request / response models of the services' HTTP APIs live in
 :mod:`~paper_enrichment_agent.common.models.service_conn`.
 """
 
+import datetime
+import enum
 import uuid
 from typing import Annotated
 
@@ -50,3 +52,25 @@ class SurveyMetadata(pydantic.BaseModel):
             )
         ),
     ]
+
+
+class SerializedDocFormat(enum.StrEnum):
+    """Enumerates the formats documents can be serialized (rendered) into."""
+
+    MARKDOWN = 'markdown'
+
+
+class RenderedDocumentMetadata(pydantic.BaseModel):
+    """Represents the metadata of a document serialized into one of the supported formats."""
+
+    paper_id: Annotated[
+        str, Field(description='The identifier of the rendered document in the database.')
+    ]
+    doc_format: Annotated[
+        SerializedDocFormat, Field(description='The format the document is rendered into.')
+    ]
+    size_bytes: Annotated[int, Field(description='The size of the rendered archive.', ge=0)]
+    rendered_at: datetime.datetime = Field(
+        default_factory=lambda: datetime.datetime.now(datetime.UTC),
+        description='The UTC time of the rendering.',
+    )

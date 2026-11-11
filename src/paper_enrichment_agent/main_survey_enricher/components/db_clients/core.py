@@ -14,6 +14,7 @@ Exported classes:
 import abc
 import asyncio
 import contextlib
+import pathlib
 from collections.abc import AsyncGenerator
 from typing import BinaryIO, Protocol, Self
 
@@ -59,6 +60,20 @@ class DBClient(Protocol):
 
         Returns:
             The content of the object.
+
+        Raises:
+            DBClientException: If the object is missing or cannot be read.
+        """
+
+    @abc.abstractmethod
+    async def read_to_stream(self, path: str, stream: BinaryIO) -> None:
+        """Writes the content of the object at the given path to the stream.
+
+        The content is transferred in chunks, without loading it whole into memory.
+
+        Args:
+            path: The path of the object.
+            stream: The writable binary stream receiving the content.
 
         Raises:
             DBClientException: If the object is missing or cannot be read.
@@ -117,6 +132,51 @@ class DBClient(Protocol):
         Returns:
             The full paths of the subdirectories, ending with `/`, e.g. `['surveys/abc/']`.
         """
+
+    async def upload_file(self, local_path: pathlib.Path, path: str, content_type: str) -> None:
+        """Streams the content of a local file to the object at the given path.
+
+        Args:
+            local_path: The path of the local file to be uploaded.
+            path: The path of the object.
+            content_type: The MIME type of the content.
+
+        Raises:
+            DBClientException: If the local file cannot be opened or the upload fails.
+        """
+
+        try:
+            with local_path.open('rb') as stream:
+                await self.write_stream(path=path, stream=stream, content_type=content_type)
+
+        except OSError as e:
+            raise DBClientException(f'Failed to read the local file {local_path}: {e}') from e
+
+    async def download_to_file(self, path: str, local_path: pathlib.Path) -> None:
+        """Streams the content of the object at the given path to a local file.
+
+        The local file is created (or truncated) on the host running the client. A partially
+        written file is removed if the download fails.
+
+        Args:
+            path: The path of the object.
+            local_path: The path of the local file to be written. Its parent directory must exist.
+
+        Raises:
+            DBClientException: If the local file cannot be written or the download fails.
+        """
+
+        try:
+            with local_path.open('wb') as stream:
+                await self.read_to_stream(path=path, stream=stream)
+
+        except OSError as e:
+            local_path.unlink(missing_ok=True)
+            raise DBClientException(f'Failed to write the local file {local_path}: {e}') from e
+
+        except DBClientException:
+            local_path.unlink(missing_ok=True)
+            raise
 
     async def upload_model(self, model: pydantic.BaseModel, path: str) -> None:
         """Serializes the pydantic model to JSON and stores it at the given path.
@@ -249,6 +309,17 @@ class S3DBClient(DBClient):
 
         except BotocoreClientError as e:
             raise DBClientException(f'Failed to read the object at {path}: {e}') from e
+
+    async def read_to_stream(self, path: str, stream: BinaryIO) -> None:
+        """See :meth:`DBClient.read_to_stream`."""
+
+        try:
+            await asyncio.to_thread(
+                self._s3_client.download_fileobj, Bucket=self._bucket, Key=path, Fileobj=stream
+            )
+
+        except BotocoreClientError as e:
+            raise DBClientException(f'Failed to read the object at {path} to stream: {e}') from e
 
     async def write_object(self, path: str, data: bytes, content_type: str) -> None:
         """See :meth:`DBClient.write_object`."""

@@ -168,6 +168,35 @@ class TestS3DBClient:
             )
 
     @pytest.mark.asyncio
+    async def test_read_to_stream_downloads_fileobj(self, s3_db_client, mock_s3_client):
+
+        stream = io.BytesIO()
+
+        await s3_db_client.read_to_stream('a/doc.zip', stream=stream)
+
+        mock_s3_client.download_fileobj.assert_called_once_with(
+            Bucket='bucket', Key='a/doc.zip', Fileobj=stream
+        )
+
+    @pytest.mark.asyncio
+    async def test_read_to_stream_raises_on_failure(self, s3_db_client, mock_s3_client):
+
+        mock_s3_client.download_fileobj.side_effect = _client_error('404', 'HeadObject')
+
+        with pytest.raises(DBClientException, match='Failed to read the object at a/doc.zip'):
+            await s3_db_client.read_to_stream('a/doc.zip', stream=io.BytesIO())
+
+    @pytest.mark.asyncio
+    async def test_read_to_stream_does_not_swallow_unexpected_errors(
+        self, s3_db_client, mock_s3_client
+    ):
+
+        mock_s3_client.download_fileobj.side_effect = RuntimeError('Unexpected')
+
+        with pytest.raises(RuntimeError, match='Unexpected'):
+            await s3_db_client.read_to_stream('a/doc.zip', stream=io.BytesIO())
+
+    @pytest.mark.asyncio
     async def test_delete_object_deletes_object(self, s3_db_client, mock_s3_client):
 
         await s3_db_client.delete_object('a/b.json')
