@@ -201,11 +201,11 @@
       "id": 11,
       "type": "logs",
       "title": "Logs",
-      "description": "Log lines of the main_survey_enricher service, newest at the bottom. Expand a line to see its JSON fields. Use the Service Logs dashboard to filter by level or regex.",
+      "description": "Log lines of the main_survey_enricher service formatted as `LEVEL [logger] event`, newest at the bottom. Expand a line to see all its JSON fields. Use the Service Logs dashboard to filter by level or regex.",
       "gridPos": {"x": 0, "y": 34, "w": 24, "h": 14},
       "datasource": {"type": "loki", "uid": "loki"},
       "targets": [
-        {"refId": "A", "expr": "{service=\"main_survey_enricher\"}", "queryType": "range"}
+        {"refId": "A", "expr": "{service=\"main_survey_enricher\"} | json | line_format \"{{ printf \\\"%-8s\\\" (.level | upper) }} [{{ .logger }}] {{ .event }}{{ if .exception }}\\n{{ .exception }}{{ end }}\"", "queryType": "range"}
       ],
       "options": {
         "showTime": true,

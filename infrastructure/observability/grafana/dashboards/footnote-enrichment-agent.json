@@ -131,11 +131,11 @@
       "id": 8,
       "type": "logs",
       "title": "Logs",
-      "description": "Log lines of the footnote_enrichment_agent service, newest at the bottom. Expand a line to see its JSON fields. Use the Service Logs dashboard to filter by level or regex.",
+      "description": "Log lines of the footnote_enrichment_agent service formatted as `LEVEL [logger] event`, newest at the bottom. Expand a line to see all its JSON fields. Use the Service Logs dashboard to filter by level or regex.",
       "gridPos": {"x": 0, "y": 21, "w": 24, "h": 14},
       "datasource": {"type": "loki", "uid": "loki"},
       "targets": [
-        {"refId": "A", "expr": "{service=\"footnote_enrichment_agent\"}", "queryType": "range"}
+        {"refId": "A", "expr": "{service=\"footnote_enrichment_agent\"} | json | line_format \"{{ printf \\\"%-8s\\\" (.level | upper) }} [{{ .logger }}] {{ .event }}{{ if .exception }}\\n{{ .exception }}{{ end }}\"", "queryType": "range"}
       ],
       "options": {
         "showTime": true,

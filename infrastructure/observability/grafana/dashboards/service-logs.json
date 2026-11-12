@@ -71,13 +71,13 @@
       "id": 2,
       "type": "logs",
       "title": "$service",
-      "description": "Log lines of the service, newest at the bottom. Expand a line to see its JSON fields.",
+      "description": "Log lines of the service formatted as `LEVEL [logger] event`, newest at the bottom. Expand a line to see all its JSON fields.",
       "gridPos": {"x": 0, "y": 7, "w": 24, "h": 14},
       "repeat": "service",
       "repeatDirection": "v",
       "datasource": {"type": "loki", "uid": "loki"},
       "targets": [
-        {"refId": "A", "expr": "{service=~\"$service\", level=~\"$level\"} |~ \"(?i)$search\"", "queryType": "range"}
+        {"refId": "A", "expr": "{service=~\"$service\", level=~\"$level\"} |~ \"(?i)$search\" | json | line_format \"{{ printf \\\"%-8s\\\" (.level | upper) }} [{{ .logger }}] {{ .event }}{{ if .exception }}\\n{{ .exception }}{{ end }}\"", "queryType": "range"}
       ],
       "options": {
         "showTime": true,
