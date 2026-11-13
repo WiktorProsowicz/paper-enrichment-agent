@@ -1,8 +1,10 @@
+import contextlib
 import zipfile
-from unittest.mock import MagicMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 
+from paper_enrichment_agent.common.http_client import HTTPClient
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models.misc import (
     DocumentMetadata,
@@ -170,6 +172,7 @@ class TestRegisterArxivSurvey:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
         await service.register_arxiv_survey(
             arxiv_id=SAMPLE_ARXIV_ID, name=SAMPLE_NAME, description=SAMPLE_DESCRIPTION
@@ -190,6 +193,7 @@ class TestRegisterArxivSurvey:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
         await service.register_arxiv_survey(
             arxiv_id=SAMPLE_ARXIV_ID, name=SAMPLE_NAME, description=SAMPLE_DESCRIPTION
@@ -216,6 +220,7 @@ class TestRegisterArxivSurvey:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(
@@ -238,6 +243,7 @@ class TestRegisterArxivSurvey:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(MainSurveyEnricherService.MainSurveyEnricherError):
@@ -262,6 +268,7 @@ class TestRegisterArxivSurvey:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(
@@ -288,6 +295,7 @@ class TestRegisterArxivSurvey:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(
@@ -312,6 +320,7 @@ class TestRegisterArxivSurvey:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(RuntimeError, match='Unexpected failure'):
@@ -338,6 +347,7 @@ class TestRemoveSurvey:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
         await service.remove_survey(SAMPLE_SURVEY_ID)
 
@@ -351,6 +361,7 @@ class TestRemoveSurvey:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
         await service.remove_survey(survey_id=SAMPLE_SURVEY_ID)
 
@@ -371,6 +382,7 @@ class TestRemoveSurvey:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
         await service.remove_survey(survey_id=SAMPLE_SURVEY_ID)
 
@@ -387,6 +399,7 @@ class TestRemoveSurvey:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(
@@ -408,6 +421,7 @@ class TestRemoveSurvey:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(
@@ -428,6 +442,7 @@ class TestRemoveSurvey:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(RuntimeError, match='Unexpected failure'):
@@ -458,6 +473,7 @@ class TestListSurveys:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
         surveys = await service.list_surveys()
 
@@ -480,6 +496,7 @@ class TestListSurveys:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(
@@ -499,6 +516,7 @@ class TestListSurveys:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(RuntimeError, match='Unexpected failure'):
@@ -523,6 +541,7 @@ class TestGetSurveyInfo:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
         survey_info = await service.get_survey_info(survey_id=SAMPLE_SURVEY_ID)
 
@@ -541,6 +560,7 @@ class TestGetSurveyInfo:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(
@@ -580,6 +600,7 @@ class TestGetDocumentDetails:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
         metadata, document = await service.get_document_details(paper_id='sample_paper_id')
 
@@ -627,6 +648,7 @@ class TestRemoveDocumentComponent:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(
@@ -644,6 +666,7 @@ class TestRemoveDocumentComponent:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
 
         await service.remove_document_component(
@@ -736,6 +759,7 @@ class TestRenderDocument:
             metrics=mock_metrics,
             doc_db_client=mock_db_client,
             rendered_doc_db_client=mock_rendered_db_client,
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
 
     @pytest.mark.asyncio
@@ -880,6 +904,7 @@ class TestListRenderedDocuments:
             metrics=mock_metrics,
             doc_db_client=MagicMock(spec=DocDBClient),
             rendered_doc_db_client=rendered_db_client,
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
 
         assert await service.list_rendered_documents('p1') == rendered_docs
@@ -898,6 +923,7 @@ class TestListRenderedDocuments:
             metrics=mock_metrics,
             doc_db_client=MagicMock(spec=DocDBClient),
             rendered_doc_db_client=rendered_db_client,
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(
@@ -923,6 +949,7 @@ class TestDownloadRenderedDocument:
             metrics=mock_metrics,
             doc_db_client=MagicMock(spec=DocDBClient),
             rendered_doc_db_client=mock_rendered_db_client,
+            footnote_agent_client=MagicMock(spec=HTTPClient),
         )
 
     @pytest.mark.asyncio
@@ -975,3 +1002,295 @@ class TestDownloadRenderedDocument:
             await service.download_rendered_document(
                 'p1', SerializedDocFormat.MARKDOWN, tmp_path / 'doc.zip'
             )
+
+
+SAMPLE_CITED_PAPER_ID = 'cited_paper_id'
+SAMPLE_CITATION_PATH = '/sections/S2/S2.SS1/P1/0.0'
+
+
+class TestEnrichFootnote:
+    @pytest.fixture
+    def sample_survey(self) -> doc_models.Document:
+
+        return doc_models.Document(
+            title='Survey Title',
+            abstract='Survey abstract.',
+            description=None,
+            sections=[
+                doc_models.Section(component_id='S1', title='1 Introduction', components=[]),
+                doc_models.Section(
+                    component_id='S2',
+                    title='2 Background',
+                    components=[
+                        doc_models.Section(
+                            component_id='S2.SS1',
+                            title='Sequence Learning',
+                            components=[
+                                doc_models.Paragraph(
+                                    component_id='P1',
+                                    elements=[
+                                        'Attention was introduced in ',
+                                        doc_models.Reference(
+                                            component_id='0.0',
+                                            ref_type='citation',
+                                            target='bib.bib1',
+                                            content_text='1',
+                                        ),
+                                        ', see ',
+                                        doc_models.Reference(
+                                            component_id='1',
+                                            ref_type='element',
+                                            target='#S1',
+                                            content_text='Section 1',
+                                        ),
+                                    ],
+                                )
+                            ],
+                        )
+                    ],
+                ),
+            ],
+            footnotes=[],
+            referenced_papers=[('bib.bib1', 'Cited paper')],
+        )
+
+    @pytest.fixture
+    def sample_cited_document(self) -> doc_models.Document:
+
+        return doc_models.Document(
+            title='Cited Title',
+            abstract='Cited abstract.',
+            description=None,
+            sections=[],
+            footnotes=[],
+            referenced_papers=[],
+        )
+
+    @pytest.fixture
+    def sample_footnote(self) -> doc_models.Section:
+
+        return doc_models.Section(
+            component_id='footnote1',
+            title='Footnote title',
+            components=[doc_models.Paragraph(elements=['Excerpt.'])],
+        )
+
+    @pytest.fixture
+    def stored_documents(self, sample_survey, sample_cited_document) -> dict:
+
+        return {
+            SAMPLE_SURVEY_ID: sample_survey,
+            SAMPLE_CITED_PAPER_ID: sample_cited_document,
+        }
+
+    @pytest.fixture
+    def mock_db_client(self, stored_documents) -> MagicMock:
+
+        # Mimics `DBClient.model_reference`: changes are persisted only on a successful exit.
+        @contextlib.asynccontextmanager
+        async def document_struct_ref(paper_id):
+            document = stored_documents[paper_id].model_copy(deep=True)
+            yield document
+            stored_documents[paper_id] = document
+
+        db_client = MagicMock(spec=DocDBClient)
+        db_client.get_survey_info.return_value = SurveyMetadata(
+            paper_id=SAMPLE_SURVEY_ID, referenced_docs={'bib.bib1': SAMPLE_CITED_PAPER_ID}
+        )
+        db_client.get_document_struct_ref.side_effect = document_struct_ref
+        return db_client
+
+    @pytest.fixture
+    def mock_footnote_agent_client(self, sample_footnote) -> AsyncMock:
+
+        client = AsyncMock(spec=HTTPClient)
+        client.apost.return_value = sample_footnote
+        return client
+
+    @pytest.fixture
+    def service(self, mock_metrics, mock_db_client, mock_footnote_agent_client):
+
+        return MainSurveyEnricherService(
+            metrics=mock_metrics,
+            doc_db_client=mock_db_client,
+            rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=mock_footnote_agent_client,
+        )
+
+    def assert_failure_recorded(self, mock_metrics, stored_documents, sample_survey):
+
+        mock_metrics.footnotes_enriched.labels.assert_called_once_with(status='failure')
+        mock_metrics.footnote_enrichment_time.observe.assert_not_called()
+        assert stored_documents[SAMPLE_SURVEY_ID] == sample_survey
+
+    @pytest.mark.asyncio
+    async def test_enrich_footnote_sends_request_built_from_survey(
+        self, service, mock_footnote_agent_client, sample_survey, sample_cited_document
+    ):
+
+        await service.enrich_footnote(SAMPLE_SURVEY_ID, SAMPLE_CITATION_PATH)
+
+        mock_footnote_agent_client.apost.assert_awaited_once()
+        path, request = mock_footnote_agent_client.apost.await_args.args
+        assert path == '/reference_to_footnote'
+        assert mock_footnote_agent_client.apost.await_args.kwargs == {
+            'response_schema': doc_models.Section
+        }
+        assert request.survey_title == 'Survey Title'
+        assert request.survey_abstract == 'Survey abstract.'
+        assert request.reference_document == sample_cited_document
+        assert request.reference_id == '0.0'
+        assert (
+            request.referencing_paragraph == sample_survey.sections[1].components[0].components[0]
+        )
+        assert request.citation_context_info == (
+            'The document was cited in the section specified by the following path in the '
+            "document tree: '2 Background' > 'Sequence Learning'"
+        )
+
+    @pytest.mark.asyncio
+    async def test_enrich_footnote_stores_footnote_and_rebinds_citation(
+        self, service, mock_metrics, stored_documents, sample_footnote
+    ):
+
+        footnote = await service.enrich_footnote(SAMPLE_SURVEY_ID, SAMPLE_CITATION_PATH)
+
+        assert footnote == sample_footnote
+
+        survey = stored_documents[SAMPLE_SURVEY_ID]
+        assert survey.footnotes == [sample_footnote]
+
+        elements = survey.sections[1].components[0].components[0].elements
+        assert len(elements) == 4
+        reference = elements[1]
+        assert reference.component_id == '0.0'
+        assert reference.ref_type == 'element'
+        assert reference.target == '/footnotes/footnote1'
+        assert reference.content_text == '1'
+        assert reference.description == (
+            'Former citation bib.bib1. Now points to enriched footnote.'
+        )
+
+        mock_metrics.footnotes_enriched.labels.assert_called_once_with(status='success')
+        mock_metrics.footnote_enrichment_time.observe.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_enrich_footnote_rejects_already_enriched_citation(
+        self, service, mock_footnote_agent_client
+    ):
+
+        await service.enrich_footnote(SAMPLE_SURVEY_ID, SAMPLE_CITATION_PATH)
+
+        with pytest.raises(
+            MainSurveyEnricherService.MainSurveyEnricherError, match='is not a citation reference'
+        ):
+            await service.enrich_footnote(SAMPLE_SURVEY_ID, SAMPLE_CITATION_PATH)
+
+        mock_footnote_agent_client.apost.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ('citation_path', 'error_match'),
+        [
+            ('/sections/S2/S2.SS1/P1/1', 'is not a citation reference'),
+            ('/sections/S2/S2.SS1/P1', 'is not a citation reference'),
+            ('/sections/S2/S2.SS1/P1/missing', 'Component not found'),
+        ],
+    )
+    async def test_enrich_footnote_raises_on_invalid_citation_path(
+        self,
+        service,
+        mock_metrics,
+        mock_footnote_agent_client,
+        stored_documents,
+        sample_survey,
+        citation_path,
+        error_match,
+    ):
+
+        with pytest.raises(MainSurveyEnricherService.MainSurveyEnricherError, match=error_match):
+            await service.enrich_footnote(SAMPLE_SURVEY_ID, citation_path)
+
+        mock_footnote_agent_client.apost.assert_not_awaited()
+        self.assert_failure_recorded(mock_metrics, stored_documents, sample_survey)
+
+    @pytest.mark.asyncio
+    async def test_enrich_footnote_raises_when_no_document_assigned(
+        self,
+        service,
+        mock_db_client,
+        mock_metrics,
+        mock_footnote_agent_client,
+        stored_documents,
+        sample_survey,
+    ):
+
+        mock_db_client.get_survey_info.return_value = SurveyMetadata(
+            paper_id=SAMPLE_SURVEY_ID, referenced_docs={}
+        )
+
+        with pytest.raises(
+            MainSurveyEnricherService.MainSurveyEnricherError,
+            match='No document is assigned to the reference bib.bib1',
+        ):
+            await service.enrich_footnote(SAMPLE_SURVEY_ID, SAMPLE_CITATION_PATH)
+
+        mock_footnote_agent_client.apost.assert_not_awaited()
+        self.assert_failure_recorded(mock_metrics, stored_documents, sample_survey)
+
+    @pytest.mark.asyncio
+    async def test_enrich_footnote_raises_when_agent_fails(
+        self, service, mock_metrics, mock_footnote_agent_client, stored_documents, sample_survey
+    ):
+
+        mock_footnote_agent_client.apost.side_effect = HTTPClient.HTTPClientError(
+            'HTTP request failed'
+        )
+
+        with pytest.raises(
+            MainSurveyEnricherService.MainSurveyEnricherError, match='HTTP request failed'
+        ):
+            await service.enrich_footnote(SAMPLE_SURVEY_ID, SAMPLE_CITATION_PATH)
+
+        self.assert_failure_recorded(mock_metrics, stored_documents, sample_survey)
+
+    @pytest.mark.asyncio
+    async def test_enrich_footnote_raises_when_db_fails(
+        self,
+        service,
+        mock_db_client,
+        mock_metrics,
+        mock_footnote_agent_client,
+        stored_documents,
+        sample_survey,
+    ):
+
+        mock_db_client.get_survey_info.side_effect = DocDBClient.DocDBClientError('Missing survey')
+
+        with pytest.raises(
+            MainSurveyEnricherService.MainSurveyEnricherError, match='Missing survey'
+        ):
+            await service.enrich_footnote(SAMPLE_SURVEY_ID, SAMPLE_CITATION_PATH)
+
+        mock_footnote_agent_client.apost.assert_not_awaited()
+        self.assert_failure_recorded(mock_metrics, stored_documents, sample_survey)
+
+    @pytest.mark.asyncio
+    async def test_enrich_footnote_raises_when_citation_removed_during_enrichment(
+        self, service, mock_metrics, mock_footnote_agent_client, stored_documents, sample_footnote
+    ):
+
+        async def remove_citation_and_respond(*args, **kwargs):
+            paragraph = stored_documents[SAMPLE_SURVEY_ID].sections[1].components[0].components[0]
+            paragraph.elements = paragraph.elements[2:]
+            return sample_footnote
+
+        mock_footnote_agent_client.apost.side_effect = remove_citation_and_respond
+
+        with pytest.raises(
+            MainSurveyEnricherService.MainSurveyEnricherError, match='Component not found'
+        ):
+            await service.enrich_footnote(SAMPLE_SURVEY_ID, SAMPLE_CITATION_PATH)
+
+        assert stored_documents[SAMPLE_SURVEY_ID].footnotes == []
+        mock_metrics.footnotes_enriched.labels.assert_called_once_with(status='failure')

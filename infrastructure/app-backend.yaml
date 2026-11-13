@@ -27,8 +27,8 @@ services:
     networks:
       - paper-enrichment-agent-network
 
-  # User-facing API of the application: registers arXiv surveys and gives access to the stored
-  # documents. Writes JSONL logs to `app-logs` and exposes Prometheus metrics on `/metrics`.
+  # User-facing API of the application: registers arXiv surveys, gives access to the stored
+  # documents and enriches survey citations into footnotes via `footnote-enrichment-agent`. Writes JSONL logs to `app-logs` and exposes Prometheus metrics on `/metrics`.
   main-survey-enricher:
     image: app-base:runtime
     restart: unless-stopped
@@ -46,6 +46,8 @@ services:
     depends_on:
       s3-database:
         condition: service_healthy
+      footnote-enrichment-agent:
+        condition: service_started
     networks:
       - paper-enrichment-agent-network
 

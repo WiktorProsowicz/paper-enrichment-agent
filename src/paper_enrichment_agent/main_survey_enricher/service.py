@@ -14,6 +14,7 @@ from functools import cache
 from prometheus_client import Counter, Gauge, Summary
 
 from paper_enrichment_agent.common import document_manipulators, logging_setup
+from paper_enrichment_agent.common.http_client import HTTPClient
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models.misc import (
     DocumentMetadata,
@@ -21,6 +22,7 @@ from paper_enrichment_agent.common.models.misc import (
     SerializedDocFormat,
     SurveyMetadata,
 )
+from paper_enrichment_agent.common.models.service_conn import FootnoteEnrichmentRequest
 from paper_enrichment_agent.main_survey_enricher.components.arxiv_parser import ArxivParser
 from paper_enrichment_agent.main_survey_enricher.components.db_clients import (
     rendered_doc_db_client,
@@ -55,11 +57,14 @@ class MainSurveyEnricherService:
         metrics: 'Metrics',
         doc_db_client: DocDBClient,
         rendered_doc_db_client: rendered_doc_db_client.RenderedDocDBClient,
+        footnote_agent_client: HTTPClient,
     ) -> None:
 
         self._metrics = metrics
         self._doc_db_client = doc_db_client
         self._rendered_doc_db_client = rendered_doc_db_client
+        # Client of the `footnote_enrichment_agent` service's API.
+        self._footnote_agent_client = footnote_agent_client
 
     async def register_arxiv_survey(self, arxiv_id: str, name: str, description: str) -> None:
         """Registers a survey for the given arXiv ID.
@@ -458,6 +463,118 @@ class MainSurveyEnricherService:
                 f'Failed to download the {doc_format} rendering of document {paper_id}: {e}'
             ) from e
 
+    async def enrich_footnote(self, survey_id: str, citation_path: str) -> doc_models.Section:
+        """Enriches a citation of a survey into a footnote composed by the footnote agent.
+
+        The document cited by the survey has to be assigned to the citation's bibliography entry
+        beforehand (see `SurveyMetadata.referenced_docs`). The request to the
+        `footnote_enrichment_agent` service is built from the survey, the cited document and the
+        titles of the sections containing the citation. The composed footnote is appended to the
+        survey's footnotes, and the citation is turned into an `element` reference pointing to it.
+
+        The survey is read again after the agent responds, so that changes made to it during the
+        enrichment are preserved. Hence, a citation can be enriched only once.
+
+        Args:
+            survey_id: The ID of the survey containing the citation.
+            citation_path: The path of the citation reference in the survey.
+
+        Returns:
+            The footnote composed for the citation.
+        """
+
+        try:
+            start = time.perf_counter()
+            survey_info = await self._doc_db_client.get_survey_info(survey_id)
+            async with self._doc_db_client.get_document_struct_ref(survey_id) as survey:
+                survey = survey.model_copy(deep=True)
+
+            paragraph, citation = self._resolve_citation(survey, citation_path)
+
+            if (referenced_paper_id := survey_info.referenced_docs.get(citation.target)) is None:
+                raise ValueError(
+                    f'No document is assigned to the reference {citation.target} of survey '
+                    f'{survey_id}.'
+                )
+
+            async with self._doc_db_client.get_document_struct_ref(
+                referenced_paper_id
+            ) as referenced_doc:
+                referenced_doc = referenced_doc.model_copy(deep=True)
+
+            request = FootnoteEnrichmentRequest(
+                survey_title=survey.title,
+                survey_abstract=survey.abstract,
+                reference_document=referenced_doc,
+                reference_id=citation.component_id,
+                referencing_paragraph=paragraph,
+                citation_context_info=_build_citation_context_info(survey, citation_path),
+            )
+            footnote = await self._footnote_agent_client.apost(
+                '/reference_to_footnote', request, response_schema=doc_models.Section
+            )
+
+            async with self._doc_db_client.get_document_struct_ref(survey_id) as survey:
+                _, citation = self._resolve_citation(survey, citation_path)
+
+                survey.footnotes.append(footnote)
+
+                citation.description = (
+                    f'Former citation {citation.target}. Now points to enriched footnote.'
+                )
+                citation.ref_type = 'element'
+                citation.target = f'/footnotes/{footnote.component_id}'
+            end = time.perf_counter()
+
+            _logger().info(
+                'Successfully enriched the citation into a footnote.',
+                survey_id=survey_id,
+                citation_path=citation_path,
+                referenced_paper_id=referenced_paper_id,
+                footnote_id=footnote.component_id,
+            )
+            self._metrics.footnotes_enriched.labels(status='success').inc()
+            self._metrics.footnote_enrichment_time.observe(end - start)
+
+            return footnote
+
+        except (DocDBClient.DocDBClientError, HTTPClient.HTTPClientError, ValueError) as e:
+            _logger().error(
+                'Failed to enrich the citation into a footnote.',
+                survey_id=survey_id,
+                citation_path=citation_path,
+                error=str(e),
+            )
+            self._metrics.footnotes_enriched.labels(status='failure').inc()
+
+            raise self.MainSurveyEnricherError(
+                f'Failed to enrich the citation {citation_path} of survey {survey_id}: {e}'
+            ) from e
+
+    def _resolve_citation(
+        self, document: doc_models.Document, citation_path: str
+    ) -> tuple[doc_models.Paragraph, doc_models.Reference]:
+        """Returns the citation reference at the given path together with its paragraph.
+
+        Raises:
+            ValueError: If the path does not point to a citation placed in a paragraph.
+        """
+
+        doc_getter = document_manipulators.DocumentGetter(document)
+
+        citation = doc_getter.get_component_by_path(citation_path)
+
+        if not (isinstance(citation, doc_models.Reference) and citation.ref_type == 'citation'):
+            raise ValueError(f'Component at path {citation_path} is not a citation reference.')
+
+        paragraph_path = citation_path.rsplit('/', 1)[0]
+        paragraph = doc_getter.get_component_by_path(paragraph_path)
+
+        if not isinstance(paragraph, doc_models.Paragraph):
+            raise ValueError(f'Component at path {paragraph_path} is not a paragraph.')
+
+        return paragraph, citation
+
     async def _place_images(
         self, environment: SerializationEnvironment, metadata: DocumentMetadata
     ) -> None:
@@ -515,9 +632,16 @@ class Metrics:
             namespace='main_survey_enricher',
         )
 
-        self.footnotes_enriched = Gauge(
+        self.footnotes_enriched = Counter(
             'footnotes_enriched',
-            'Number of footnotes enriched by the system.',
+            'Number of survey citations enriched into footnotes by the system.',
+            labelnames=['status'],  # status can be 'success' or 'failure'
+            namespace='main_survey_enricher',
+        )
+
+        self.footnote_enrichment_time = Summary(
+            'footnote_enrichment_time',
+            'Time spent on successful footnote enrichments, including the agent call.',
             namespace='main_survey_enricher',
         )
 
@@ -554,3 +678,21 @@ class Metrics:
 
         for status in ('success', 'failure'):
             self.papers_parsed.labels(source='arxiv', status=status)
+            self.footnotes_enriched.labels(status=status)
+
+
+def _build_citation_context_info(survey: doc_models.Document, citation_path: str) -> str:
+    """Describes the location of the citation in the survey for the footnote agent."""
+
+    sections_path = ' > '.join(
+        f"'{component.title}'"
+        for component in document_manipulators.DocumentGetter(survey).get_components_on_path(
+            citation_path
+        )
+        if isinstance(component, doc_models.Section)
+    )
+
+    return (
+        'The document was cited in the section specified by the following path in the document '
+        f'tree: {sections_path}'
+    )

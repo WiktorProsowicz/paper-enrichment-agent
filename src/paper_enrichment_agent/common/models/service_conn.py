@@ -108,3 +108,21 @@ class DocumentRenderingRequest(pydantic.BaseModel):
     doc_format: Annotated[
         SerializedDocFormat, Field(description='The format to render the document into.')
     ]
+
+
+class SurveyFootnoteEnrichmentRequest(pydantic.BaseModel):
+    """Contains request data for enriching a citation of a survey into a footnote."""
+
+    survey_id: Annotated[
+        str, Field(description='The ID of the survey containing the citation.', min_length=1)
+    ]
+    citation_path: Annotated[
+        str,
+        Field(
+            description=(
+                'The POSIX-like path of the citation reference to enrich, e.g. '
+                '`/sections/<id>/<paragraph_id>/<reference_id>`.'
+            ),
+            min_length=1,
+        ),
+    ]

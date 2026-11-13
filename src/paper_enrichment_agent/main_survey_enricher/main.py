@@ -22,6 +22,8 @@ from pydantic import Field
 from starlette.background import BackgroundTask
 
 from paper_enrichment_agent.common import logging_setup
+from paper_enrichment_agent.common.http_client import HTTPClient
+from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models import misc as misc_models
 from paper_enrichment_agent.common.models import service_conn as conn_models
 from paper_enrichment_agent.main_survey_enricher.components.db_clients import (
@@ -78,6 +80,20 @@ class AppCfg(pydantic.BaseModel):
                 'valid S3 bucket name, i.e. lowercase letters, digits, dots and hyphens only.'
             ),
             min_length=3,
+        ),
+    ]
+    footnote_enrichment_agent_url: Annotated[
+        str,
+        Field(description='The base URL of the `footnote_enrichment_agent` service.', min_length=1),
+    ]
+    footnote_enrichment_timeout: Annotated[
+        float,
+        Field(
+            description=(
+                'The timeout (in seconds) of a single footnote enrichment request sent to the '
+                '`footnote_enrichment_agent` service. It has to accommodate the whole agent run.'
+            ),
+            gt=0,
         ),
     ]
 
@@ -152,6 +168,14 @@ def create_app(service: MainSurveyEnricherService) -> fastapi.FastAPI:
             paper_id=request.paper_id, doc_format=request.doc_format
         )
 
+    @app.post('/enrich_footnote')
+    async def enrich_footnote(
+        request: conn_models.SurveyFootnoteEnrichmentRequest,
+    ) -> doc_models.Section:
+        return await service.enrich_footnote(
+            survey_id=request.survey_id, citation_path=request.citation_path
+        )
+
     @app.get('/list_rendered_documents')
     async def list_rendered_documents(
         paper_id: str | None = None,
@@ -211,8 +235,16 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
         )
     )
 
+    footnote_agent_client = HTTPClient(
+        base_url=app_cfg.footnote_enrichment_agent_url,
+        timeout=app_cfg.footnote_enrichment_timeout,
+    )
+
     service = MainSurveyEnricherService(
-        metrics=Metrics(), doc_db_client=doc_db_client, rendered_doc_db_client=rendered_db_client
+        metrics=Metrics(),
+        doc_db_client=doc_db_client,
+        rendered_doc_db_client=rendered_db_client,
+        footnote_agent_client=footnote_agent_client,
     )
 
     app = create_app(service=service)

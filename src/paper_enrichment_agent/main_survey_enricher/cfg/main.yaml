@@ -9,3 +9,6 @@ s3_access_key_id: ''
 s3_secret_access_key: ''
 doc_db_bucket_name: document-database
 rendered_db_bucket_name: rendered-documents
+
+footnote_enrichment_agent_url: http://footnote-enrichment-agent:8081
+footnote_enrichment_timeout: 300.0
