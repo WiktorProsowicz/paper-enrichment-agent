@@ -11,9 +11,10 @@ import tempfile
 import time
 from functools import cache
 
+from mlflow.entities import SpanType
 from prometheus_client import Counter, Gauge, Summary
 
-from paper_enrichment_agent.common import document_manipulators, logging_setup
+from paper_enrichment_agent.common import document_manipulators, logging_setup, mlflow_setup
 from paper_enrichment_agent.common.http_client import HTTPClient
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models.misc import (
@@ -462,8 +463,14 @@ class MainSurveyEnricherService:
                 f'Failed to download the {doc_format} rendering of document {paper_id}: {e}'
             ) from e
 
+    @mlflow_setup.trace_if_enabled(
+        name='MainSurveyEnricherService::enrich_footnote', span_type=SpanType.CHAIN
+    )
     async def enrich_footnote(self, survey_id: str, citation_path: str) -> doc_models.Section:
         """Enriches a citation of a survey into a footnote composed by the footnote agent.
+
+        If the MLflow tracing is enabled, the call is traced as a span whose context is propagated
+        to the footnote agent, so the agent's spans are logged as part of the same trace.
 
         The document cited by the survey has to be assigned to the citation's bibliography entry
         beforehand (see `SurveyMetadata.referenced_docs`). The request to the

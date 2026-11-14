@@ -3,6 +3,10 @@ json_logs_path: /tmp/output_logs.jsonl
 
 app_port: 8082
 
+mlflow_cfg:
+  tracking_uri: http://mlflow:5000
+  experiment_name: paper-enrichment-runtime
+
 s3_endpoint_url: http://s3-database:8333
 s3_region: us-east-1
 s3_access_key_id: ''

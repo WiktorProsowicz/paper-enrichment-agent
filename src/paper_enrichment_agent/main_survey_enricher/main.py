@@ -21,7 +21,7 @@ import uvicorn
 from pydantic import Field
 from starlette.background import BackgroundTask
 
-from paper_enrichment_agent.common import logging_setup
+from paper_enrichment_agent.common import logging_setup, mlflow_setup
 from paper_enrichment_agent.common.http_client import HTTPClient
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models import misc as misc_models
@@ -48,6 +48,10 @@ class AppCfg(pydantic.BaseModel):
         pathlib.Path, Field(description='Output path for storing json log events.')
     ]
     app_port: Annotated[int, Field(description='The port on which the FastAPI app will run.')]
+    mlflow_cfg: Annotated[
+        mlflow_setup.MLFlowConfig,
+        Field(description='Configuration of the MLflow tracing.'),
+    ]
     s3_endpoint_url: Annotated[
         str, Field(description='The URL of the S3-compatible document database.', min_length=1)
     ]
@@ -217,6 +221,8 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
 
     logging_setup.setup_logging(app_cfg.json_logs_path)
     _logger().info('Running main_survey_enricher service', cfg=app_cfg)
+
+    mlflow_setup.setup_mlflow(app_cfg.mlflow_cfg)
 
     s3_client = boto3.client(
         's3',
