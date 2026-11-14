@@ -248,6 +248,27 @@ class TestDocumentGetter:
         assert isinstance(components[0], doc_models.Section)
         assert isinstance(components[1], doc_models.MathExpression)
 
+    def test_get_components_on_path_skips_siblings_with_prefixed_ids(self):
+        document = doc_models.Document(
+            title='Title',
+            abstract='Abstract',
+            description=None,
+            sections=[
+                doc_models.Section(component_id='S1', title='First', components=[]),
+                doc_models.Section(
+                    component_id='S10',
+                    title='Tenth',
+                    components=[doc_models.Paragraph(component_id='p1', elements=['Text'])],
+                ),
+            ],
+            footnotes=[],
+            referenced_papers=[],
+        )
+
+        components = DocumentGetter(document).get_components_on_path('/sections/S10/p1')
+
+        assert [c.component_id for c in components] == ['S10', 'p1']
+
 
 class TestDocumentSetter:
     def test_remove_component_with_path(self, sample_document):

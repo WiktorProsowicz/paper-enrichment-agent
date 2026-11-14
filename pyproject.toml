@@ -76,6 +76,7 @@ show_missing = true
 omit = [
     "src/paper_enrichment_agent/footnote_enrichment_agent/components/agent.py",
     "src/paper_enrichment_agent/footnote_enrichment_agent/main.py",
+    "src/paper_enrichment_agent/main_survey_enricher/main.py",
 ]
 
 [tool.mypy]

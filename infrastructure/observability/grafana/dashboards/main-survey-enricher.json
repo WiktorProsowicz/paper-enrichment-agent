@@ -1,0 +1,242 @@
+{
+  "uid": "main-survey-enricher",
+  "title": "Main Survey Enricher",
+  "description": "Business metrics of the main_survey_enricher service (main_survey_enricher.service.Metrics).",
+  "tags": ["logs"],
+  "timezone": "browser",
+  "editable": false,
+  "graphTooltip": 1,
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "time": {"from": "now-24h", "to": "now"},
+  "templating": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Papers added",
+      "description": "Papers added to the document database in the selected time range.",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "sum(increase(main_survey_enricher_papers_added_total[$__range]))", "instant": true}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "decimals": 0, "noValue": "0", "color": {"mode": "fixed", "fixedColor": "green"}}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "none", "textMode": "value", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Papers removed",
+      "description": "Papers (surveys and their referenced documents) removed in the selected time range.",
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "sum(increase(main_survey_enricher_papers_removed_total[$__range]))", "instant": true}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "decimals": 0, "noValue": "0", "color": {"mode": "fixed", "fixedColor": "orange"}}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "none", "textMode": "value", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Parsing success rate",
+      "description": "Share of successfully parsed papers in the selected time range.",
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "sum(increase(main_survey_enricher_papers_parsed_total{status=\"success\"}[$__range])) / sum(increase(main_survey_enricher_papers_parsed_total[$__range]))", "instant": true}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "noValue": "-",
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "orange", "value": 0.8}, {"color": "green", "value": 0.95}]}
+        },
+        "overrides": []
+      },
+      "options": {"colorMode": "value", "graphMode": "none", "textMode": "value", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Mean parsing time",
+      "description": "Mean duration of successful paper parsing in the selected time range.",
+      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "increase(main_survey_enricher_paper_parsing_time_sum[$__range]) / increase(main_survey_enricher_paper_parsing_time_count[$__range])", "instant": true}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s", "noValue": "-", "color": {"mode": "fixed", "fixedColor": "purple"}}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "none", "textMode": "value", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Papers parsed by status",
+      "description": "Parsed papers per interval, split by source and outcome.",
+      "gridPos": {"x": 0, "y": 5, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "interval": "1m",
+      "targets": [
+        {"refId": "A", "expr": "sum by (source, status) (increase(main_survey_enricher_papers_parsed_total[$__interval]))", "legendFormat": "{{source}} {{status}}"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "short", "min": 0, "custom": {"drawStyle": "bars", "fillOpacity": 70, "stacking": {"mode": "normal"}}},
+        "overrides": [
+          {"matcher": {"id": "byRegexp", "options": ".* success"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "green"}}]},
+          {"matcher": {"id": "byRegexp", "options": ".* (failed|failure)"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Papers added / removed",
+      "description": "Papers added (by source) and removed per interval.",
+      "gridPos": {"x": 12, "y": 5, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "interval": "1m",
+      "targets": [
+        {"refId": "A", "expr": "sum by (source) (increase(main_survey_enricher_papers_added_total[$__interval]))", "legendFormat": "added ({{source}})"},
+        {"refId": "B", "expr": "sum(increase(main_survey_enricher_papers_removed_total[$__interval]))", "legendFormat": "removed"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "short", "min": 0, "custom": {"drawStyle": "bars", "fillOpacity": 70}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "removed"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Mean paper parsing time",
+      "description": "Mean duration of successful paper parsing over a 5-minute window.",
+      "gridPos": {"x": 0, "y": 13, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "rate(main_survey_enricher_paper_parsing_time_sum[5m]) / rate(main_survey_enricher_paper_parsing_time_count[5m])", "legendFormat": "mean"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s", "min": 0, "custom": {"fillOpacity": 10, "spanNulls": true}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Document database operations",
+      "description": "Successful document database operations per second and their mean duration over a 5-minute window.",
+      "gridPos": {"x": 12, "y": 13, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "rate(main_survey_enricher_doc_db_operations_time_sum[5m]) / rate(main_survey_enricher_doc_db_operations_time_count[5m])", "legendFormat": "mean duration"},
+        {"refId": "B", "expr": "rate(main_survey_enricher_doc_db_operations_time_count[5m])", "legendFormat": "operations / s"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "s", "min": 0, "custom": {"fillOpacity": 10, "spanNulls": true}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "operations / s"}, "properties": [{"id": "unit", "value": "ops"}, {"id": "custom.axisPlacement", "value": "right"}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Characters translated",
+      "description": "Current value of the characters_translated gauge. The service does not set it yet.",
+      "gridPos": {"x": 0, "y": 21, "w": 24, "h": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "main_survey_enricher_characters_translated", "instant": true}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "noValue": "0", "color": {"mode": "fixed", "fixedColor": "blue"}}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "area", "textMode": "value", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Documents rendered by status",
+      "description": "Document renderings (serializations) per output format and status, per interval.",
+      "gridPos": {"x": 0, "y": 26, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "interval": "1m",
+      "targets": [
+        {"refId": "A", "expr": "sum by (format, status) (increase(main_survey_enricher_documents_rendered_total[$__interval]))", "legendFormat": "{{format}} / {{status}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "custom": {"drawStyle": "bars", "fillOpacity": 70}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Mean document rendering time",
+      "description": "Mean duration of successful renderings (including the database transfers) over a 5-minute window.",
+      "gridPos": {"x": 12, "y": 26, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "rate(main_survey_enricher_document_rendering_time_sum[5m]) / rate(main_survey_enricher_document_rendering_time_count[5m])", "legendFormat": "mean"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s", "min": 0, "custom": {"fillOpacity": 10, "spanNulls": true}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Footnotes enriched by status",
+      "description": "Footnote enrichment requests (survey citations turned into footnotes by the footnote enrichment agent) per status, per interval.",
+      "gridPos": {"x": 0, "y": 34, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "interval": "1m",
+      "targets": [
+        {"refId": "A", "expr": "sum by (status) (increase(main_survey_enricher_footnotes_enriched_total[$__interval]))", "legendFormat": "{{status}}"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "short", "min": 0, "custom": {"drawStyle": "bars", "fillOpacity": 70}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "success"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "green"}}]},
+          {"matcher": {"id": "byName", "options": "failure"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Mean footnote enrichment time",
+      "description": "Mean duration of successful footnote enrichments (including the agent call and the database transfers) over a 5-minute window.",
+      "gridPos": {"x": 12, "y": 34, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "rate(main_survey_enricher_footnote_enrichment_time_sum[5m]) / rate(main_survey_enricher_footnote_enrichment_time_count[5m])", "legendFormat": "mean"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s", "min": 0, "custom": {"fillOpacity": 10, "spanNulls": true}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 11,
+      "type": "logs",
+      "title": "Logs",
+      "description": "Log lines of the main_survey_enricher service formatted as `LEVEL [logger] event`, newest at the bottom. Expand a line to see all its JSON fields. Use the Service Logs dashboard to filter by level or regex.",
+      "gridPos": {"x": 0, "y": 42, "w": 24, "h": 14},
+      "datasource": {"type": "loki", "uid": "loki"},
+      "targets": [
+        {"refId": "A", "expr": "{service=\"main_survey_enricher\"} | json | line_format \"{{ printf \\\"%-8s\\\" (.level | upper) }} [{{ .logger }}] {{ .event }}{{ if .exception }}\\n{{ .exception }}{{ end }}\"", "queryType": "range"}
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Ascending"
+      }
+    }
+  ]
+}

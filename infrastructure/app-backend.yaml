@@ -1,0 +1,164 @@
+---
+name: app-backend
+
+services:
+  # S3-compatible object store (SeaweedFS) serving as the document database of
+  # `main-survey-enricher` (parsed documents, their metadata and images). Data is kept in
+  # `seaweedfs-data`.
+  s3-database:
+    image: chrislusf/seaweedfs:4.48
+    restart: unless-stopped
+    # SeaweedFS uses the AWS_* variables as credentials of the S3 admin identity.
+    environment:
+      AWS_ACCESS_KEY_ID: ${S3_DATABASE_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${S3_DATABASE_SECRET_ACCESS_KEY}
+    command: [server, -dir=/data, -s3, -s3.port=8333]
+    # Filer web UI for browsing the stored documents (bucket at `/buckets/<bucket_name>/`).
+    ports:
+      - 8888:8888
+    volumes:
+      - seaweedfs-data:/data
+    # `localhost` resolves to IPv6 in the image, while the S3 gateway listens on IPv4 only.
+    healthcheck:
+      test: [CMD-SHELL, wget -q -O /dev/null http://127.0.0.1:8333/healthz || exit 1]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - paper-enrichment-agent-network
+
+  # User-facing API of the application: registers arXiv surveys, gives access to the stored
+  # documents and enriches survey citations into footnotes via `footnote-enrichment-agent`. Writes JSONL logs to `app-logs` and exposes Prometheus metrics on `/metrics`.
+  main-survey-enricher:
+    image: app-base:runtime
+    restart: unless-stopped
+    command: [uv, run, python, -m, paper_enrichment_agent.main_survey_enricher.main, json_logs_path=/var/log/paper-enrichment-agent/main_survey_enricher.jsonl,
+      's3_access_key_id=${S3_DATABASE_ACCESS_KEY_ID}', 's3_secret_access_key=${S3_DATABASE_SECRET_ACCESS_KEY}']
+    ports:
+      - 8082:8082
+    volumes:
+      - app-logs:/var/log/paper-enrichment-agent
+    healthcheck:
+      test: [CMD-SHELL, curl -f http://localhost:8082/health || exit 1]
+      interval: 60s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      s3-database:
+        condition: service_healthy
+      footnote-enrichment-agent:
+        condition: service_started
+    networks:
+      - paper-enrichment-agent-network
+
+  # Internal LLM agent composing context-aware footnotes from the cited papers. Traces are sent to
+  # the MLflow server. Writes JSONL logs to `app-logs` and exposes Prometheus metrics on `/metrics`.
+  footnote-enrichment-agent:
+    image: app-base:runtime
+    restart: unless-stopped
+    command: [uv, run, python, -m, paper_enrichment_agent.footnote_enrichment_agent.main, json_logs_path=/var/log/paper-enrichment-agent/footnote_enrichment_agent.jsonl,
+      'agent_llm_model=${LLM_MODEL}', 'llm_api_key=${LLM_API_KEY}']
+    volumes:
+      - app-logs:/var/log/paper-enrichment-agent
+    healthcheck:
+      test: [CMD-SHELL, curl -f http://localhost:8081/health || exit 1]
+      interval: 60s
+      timeout: 5s
+      retries: 10
+    networks:
+      - paper-enrichment-agent-network
+
+  # Log storage queried by Grafana (or directly via its HTTP API). Data is kept in `loki-data`,
+  # see `observability/loki.yaml` for the retention.
+  loki:
+    image: grafana/loki:3.7.9
+    restart: unless-stopped
+    command: [-config.file=/etc/loki/config.yaml]
+    ports:
+      - 3100:3100
+    volumes:
+      - ./observability/loki.yaml:/etc/loki/config.yaml:ro
+      - loki-data:/loki
+    healthcheck:
+      test: [CMD, /usr/bin/loki, -health]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - paper-enrichment-agent-network
+
+  # Log shipper (successor of Promtail): tails the services' JSONL logs from `app-logs` and pushes
+  # them to Loki, labelled with `service` and `level`. Read positions are kept in `alloy-data`.
+  alloy:
+    image: grafana/alloy:v1.20.1
+    restart: unless-stopped
+    command: [run, --storage.path=/var/lib/alloy/data, /etc/alloy/config.alloy]
+    volumes:
+      - ./observability/config.alloy:/etc/alloy/config.alloy:ro
+      - app-logs:/var/log/paper-enrichment-agent:ro
+      - alloy-data:/var/lib/alloy/data
+    depends_on:
+      loki:
+        condition: service_started
+    networks:
+      - paper-enrichment-agent-network
+
+  # Metrics storage scraping the services' `/metrics` endpoints (see `observability/prometheus.yaml`).
+  # Data is kept in `prometheus-data`.
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    restart: unless-stopped
+    command: [--config.file=/etc/prometheus/prometheus.yaml, --storage.tsdb.path=/prometheus, --storage.tsdb.retention.time=30d]
+    ports:
+      - 9090:9090
+    volumes:
+      - ./observability/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - paper-enrichment-agent-network
+
+  # Dashboards for the services' telemetry, metrics and logs, provisioned from
+  # `observability/grafana/`. State (users, preferences) is kept in `grafana-data`.
+  grafana:
+    image: grafana/grafana:13.2.4
+    restart: unless-stopped
+    # The admin credentials are applied only when `grafana-data` is initialized.
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/service-overview.json
+      TZ: Europe/Warsaw
+      GF_DEFAULT_TIMEZONE: Europe/Warsaw
+    ports:
+      - 3000:3000
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    healthcheck:
+      test: [CMD-SHELL, wget -q -O /dev/null http://127.0.0.1:3000/api/health || exit 1]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    depends_on:
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_healthy
+    networks:
+      - paper-enrichment-agent-network
+
+volumes:
+  seaweedfs-data:
+  app-logs:
+  loki-data:
+  alloy-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  paper-enrichment-agent-network:
+    external: true
+    name: paper-enrichment-agent-network

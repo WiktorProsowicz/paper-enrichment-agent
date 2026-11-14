@@ -1,0 +1,136 @@
+{
+  "uid": "service-overview",
+  "title": "Service Overview",
+  "description": "Availability and process telemetry of the backend services, based on the default prometheus_client process collectors.",
+  "tags": ["telemetry"],
+  "timezone": "browser",
+  "editable": false,
+  "graphTooltip": 1,
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "time": {"from": "now-6h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "job",
+        "label": "Service",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "query": {"query": "label_values(process_start_time_seconds{job!=\"prometheus\"}, job)", "refId": "job"},
+        "definition": "label_values(process_start_time_seconds{job!=\"prometheus\"}, job)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": {"text": "All", "value": "$__all"},
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Status",
+      "description": "Whether the last Prometheus scrape of the service's /metrics endpoint succeeded.",
+      "gridPos": {"x": 0, "y": 0, "w": 8, "h": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "up{job=~\"$job\"}", "legendFormat": "{{job}}", "instant": true}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "DOWN",
+          "mappings": [
+            {"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}
+          ],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+        },
+        "overrides": []
+      },
+      "options": {"colorMode": "background", "graphMode": "none", "textMode": "value_and_name", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Uptime",
+      "description": "Time since the service process started.",
+      "gridPos": {"x": 8, "y": 0, "w": 8, "h": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "time() - process_start_time_seconds{job=~\"$job\"}", "legendFormat": "{{job}}", "instant": true}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "s", "decimals": 0, "color": {"mode": "fixed", "fixedColor": "blue"}},
+        "overrides": []
+      },
+      "options": {"colorMode": "value", "graphMode": "none", "textMode": "value_and_name", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Resident memory",
+      "description": "Current resident set size of the service process.",
+      "gridPos": {"x": 16, "y": 0, "w": 8, "h": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "process_resident_memory_bytes{job=~\"$job\"}", "legendFormat": "{{job}}", "instant": true}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "bytes", "color": {"mode": "fixed", "fixedColor": "purple"}},
+        "overrides": []
+      },
+      "options": {"colorMode": "value", "graphMode": "area", "textMode": "value_and_name", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Availability",
+      "description": "Scrape success over time (1 = up, 0 = down).",
+      "gridPos": {"x": 0, "y": 5, "w": 24, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "up{job=~\"$job\"}", "legendFormat": "{{job}}"}
+      ],
+      "fieldConfig": {
+        "defaults": {"min": 0, "max": 1, "decimals": 0, "custom": {"drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 10}},
+        "overrides": []
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "CPU usage",
+      "description": "CPU time used by the process per second of wall time (1 = one full core).",
+      "gridPos": {"x": 0, "y": 11, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "rate(process_cpu_seconds_total{job=~\"$job\"}[$__rate_interval])", "legendFormat": "{{job}}"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "percentunit", "min": 0, "custom": {"fillOpacity": 10}},
+        "overrides": []
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Memory",
+      "description": "Resident and virtual memory of the process.",
+      "gridPos": {"x": 12, "y": 11, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "process_resident_memory_bytes{job=~\"$job\"}", "legendFormat": "{{job}} resident"},
+        {"refId": "B", "expr": "process_virtual_memory_bytes{job=~\"$job\"}", "legendFormat": "{{job}} virtual"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "bytes", "min": 0, "custom": {"fillOpacity": 10}},
+        "overrides": [
+          {"matcher": {"id": "byRegexp", "options": ".* virtual"}, "properties": [{"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 10]}}, {"id": "custom.fillOpacity", "value": 0}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    }
+  ]
+}

@@ -30,7 +30,7 @@ from mcp.client.streamable_http import streamable_http_client as mcp_client
 from mlflow.entities import SpanType
 
 from paper_enrichment_agent.common.models import document as doc_models
-from paper_enrichment_agent.common.models.misc import FootnoteEnrichmentRequest
+from paper_enrichment_agent.common.models.service_conn import FootnoteEnrichmentRequest
 from paper_enrichment_agent.footnote_enrichment_agent.components import doc_utils
 from paper_enrichment_agent.footnote_enrichment_agent.components.enrichment_tools import (
     EnrichmentTools,

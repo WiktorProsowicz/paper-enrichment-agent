@@ -1,0 +1,94 @@
+{
+  "uid": "service-logs",
+  "title": "Service Logs",
+  "description": "JSONL logs of the backend services shipped to Loki by Alloy. One logs panel is shown per selected service.",
+  "tags": ["logs"],
+  "timezone": "browser",
+  "editable": false,
+  "graphTooltip": 1,
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "time": {"from": "now-6h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "query",
+        "datasource": {"type": "loki", "uid": "loki"},
+        "query": {"type": 1, "label": "service", "stream": "", "refId": "LokiVariableQueryEditor-VariableQuery"},
+        "definition": "label_values(service)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": {"text": "All", "value": "$__all"},
+        "sort": 1
+      },
+      {
+        "name": "level",
+        "label": "Level",
+        "type": "query",
+        "datasource": {"type": "loki", "uid": "loki"},
+        "query": {"type": 1, "label": "level", "stream": "", "refId": "LokiVariableQueryEditor-VariableQuery"},
+        "definition": "label_values(level)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".+",
+        "current": {"text": "All", "value": "$__all"},
+        "sort": 1
+      },
+      {
+        "name": "search",
+        "label": "Search (regex)",
+        "type": "textbox",
+        "query": "",
+        "current": {"text": "", "value": ""}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Log volume",
+      "description": "Number of log lines per interval, by service and level.",
+      "gridPos": {"x": 0, "y": 0, "w": 24, "h": 7},
+      "datasource": {"type": "loki", "uid": "loki"},
+      "targets": [
+        {"refId": "A", "expr": "sum by (service, level) (count_over_time({service=~\"$service\", level=~\"$level\"} |~ \"(?i)$search\" [$__auto]))", "legendFormat": "{{service}} {{level}}", "queryType": "range"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "short", "min": 0, "custom": {"drawStyle": "bars", "fillOpacity": 70, "stacking": {"mode": "normal"}}},
+        "overrides": [
+          {"matcher": {"id": "byRegexp", "options": ".* (error|critical)"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]},
+          {"matcher": {"id": "byRegexp", "options": ".* warning"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 2,
+      "type": "logs",
+      "title": "$service",
+      "description": "Log lines of the service formatted as `LEVEL [logger] event`, newest at the bottom. Expand a line to see all its JSON fields.",
+      "gridPos": {"x": 0, "y": 7, "w": 24, "h": 14},
+      "repeat": "service",
+      "repeatDirection": "v",
+      "datasource": {"type": "loki", "uid": "loki"},
+      "targets": [
+        {"refId": "A", "expr": "{service=~\"$service\", level=~\"$level\"} |~ \"(?i)$search\" | json | line_format \"{{ printf \\\"%-8s\\\" (.level | upper) }} [{{ .logger }}] {{ .event }}{{ if .exception }}\\n{{ .exception }}{{ end }}\"", "queryType": "range"}
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Ascending"
+      }
+    }
+  ]
+}

@@ -1,0 +1,152 @@
+{
+  "uid": "footnote-enrichment-agent",
+  "title": "Footnote Enrichment Agent",
+  "description": "Business metrics of the footnote_enrichment_agent service (footnote_enrichment_agent.service.Metrics).",
+  "tags": ["logs"],
+  "timezone": "browser",
+  "editable": false,
+  "graphTooltip": 1,
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "time": {"from": "now-24h", "to": "now"},
+  "templating": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Enrichment requests",
+      "description": "Footnote enrichment requests received in the selected time range.",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "sum(increase(footnote_enrichment_agent_enrichment_requests_total[$__range]))", "instant": true}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "decimals": 0, "noValue": "0", "color": {"mode": "fixed", "fixedColor": "blue"}}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "none", "textMode": "value", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Success rate",
+      "description": "Share of successful enrichment requests in the selected time range.",
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "sum(increase(footnote_enrichment_agent_enrichment_requests_total{status=\"success\"}[$__range])) / sum(increase(footnote_enrichment_agent_enrichment_requests_total[$__range]))", "instant": true}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "noValue": "-",
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "orange", "value": 0.8}, {"color": "green", "value": 0.95}]}
+        },
+        "overrides": []
+      },
+      "options": {"colorMode": "value", "graphMode": "none", "textMode": "value", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Failed requests",
+      "description": "Failed enrichment requests in the selected time range.",
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "sum(increase(footnote_enrichment_agent_enrichment_requests_total{status!=\"success\"}[$__range]))", "instant": true}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}
+        },
+        "overrides": []
+      },
+      "options": {"colorMode": "value", "graphMode": "none", "textMode": "value", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Mean enrichment time",
+      "description": "Mean duration of successful enrichment requests in the selected time range.",
+      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "increase(footnote_enrichment_agent_enrichment_time_sum[$__range]) / increase(footnote_enrichment_agent_enrichment_time_count[$__range])", "instant": true}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s", "noValue": "-", "color": {"mode": "fixed", "fixedColor": "purple"}}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "none", "textMode": "value", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Enrichment requests by status",
+      "description": "Enrichment requests per interval, split by outcome.",
+      "gridPos": {"x": 0, "y": 5, "w": 12, "h": 9},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "interval": "1m",
+      "targets": [
+        {"refId": "A", "expr": "sum by (status) (increase(footnote_enrichment_agent_enrichment_requests_total[$__interval]))", "legendFormat": "{{status}}"}
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "short", "min": 0, "custom": {"drawStyle": "bars", "fillOpacity": 70, "stacking": {"mode": "normal"}}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "success"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "green"}}]},
+          {"matcher": {"id": "byName", "options": "failure"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Mean enrichment time",
+      "description": "Mean duration of successful enrichment requests over a 5-minute window.",
+      "gridPos": {"x": 12, "y": 5, "w": 12, "h": 9},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "rate(footnote_enrichment_agent_enrichment_time_sum[5m]) / rate(footnote_enrichment_agent_enrichment_time_count[5m])", "legendFormat": "mean"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s", "min": 0, "custom": {"fillOpacity": 10, "spanNulls": true}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Improvement requests by status",
+      "description": "Footnote improvement requests per interval. The metric is defined, but the service does not handle improvement requests yet.",
+      "gridPos": {"x": 0, "y": 14, "w": 24, "h": 7},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "interval": "1m",
+      "targets": [
+        {"refId": "A", "expr": "sum by (status) (increase(footnote_enrichment_agent_improvement_requests_total[$__interval]))", "legendFormat": "{{status}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "noValue": "No improvement requests", "custom": {"drawStyle": "bars", "fillOpacity": 70, "stacking": {"mode": "normal"}}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 8,
+      "type": "logs",
+      "title": "Logs",
+      "description": "Log lines of the footnote_enrichment_agent service formatted as `LEVEL [logger] event`, newest at the bottom. Expand a line to see all its JSON fields. Use the Service Logs dashboard to filter by level or regex.",
+      "gridPos": {"x": 0, "y": 21, "w": 24, "h": 14},
+      "datasource": {"type": "loki", "uid": "loki"},
+      "targets": [
+        {"refId": "A", "expr": "{service=\"footnote_enrichment_agent\"} | json | line_format \"{{ printf \\\"%-8s\\\" (.level | upper) }} [{{ .logger }}] {{ .event }}{{ if .exception }}\\n{{ .exception }}{{ end }}\"", "queryType": "range"}
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Ascending"
+      }
+    }
+  ]
+}

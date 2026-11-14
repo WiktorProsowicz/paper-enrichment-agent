@@ -1,0 +1,56 @@
+// Ships the JSONL logs written by the services (see `common/logging_setup.py`) to Loki.
+//
+// Each service writes to `/var/log/paper-enrichment-agent/<service_name>.jsonl`. Rotated files
+// (`<service_name>.jsonl.<n>`) are not matched, as their content has already been shipped.
+// The read positions are kept in Alloy's storage path, so that a redeployment does not ship
+// the same lines twice.
+
+local.file_match "service_logs" {
+  path_targets = [{"__path__" = "/var/log/paper-enrichment-agent/*.jsonl"}]
+  sync_period  = "10s"
+}
+
+loki.source.file "service_logs" {
+  targets    = local.file_match.service_logs.targets
+  forward_to = [loki.process.service_logs.receiver]
+}
+
+loki.process "service_logs" {
+  stage.regex {
+    source     = "filename"
+    expression = "^/var/log/paper-enrichment-agent/(?P<service>[a-z_]+)\\.jsonl$"
+  }
+
+  stage.json {
+    expressions = {
+      level     = "",
+      timestamp = "",
+    }
+  }
+
+  // Matches the `TimeStamper(fmt='%Y-%m-%d %H:%M:%S', utc=True)` processor of the services.
+  stage.timestamp {
+    source   = "timestamp"
+    format   = "2006-01-02 15:04:05"
+    location = "UTC"
+  }
+
+  stage.labels {
+    values = {
+      service = "",
+      level   = "",
+    }
+  }
+
+  stage.label_drop {
+    values = ["filename"]
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

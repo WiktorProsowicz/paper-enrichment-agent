@@ -13,7 +13,7 @@ from prometheus_client import Counter, Summary
 
 from paper_enrichment_agent.common import logging_setup
 from paper_enrichment_agent.common.models import document as doc_models
-from paper_enrichment_agent.common.models.misc import FootnoteEnrichmentRequest
+from paper_enrichment_agent.common.models.service_conn import FootnoteEnrichmentRequest
 from paper_enrichment_agent.footnote_enrichment_agent.components.agent import (
     FootnoteEnrichmentAgent,
 )
@@ -53,6 +53,15 @@ class FootnoteEnrichmentAgentService:
         Args:
             request: The footnote enrichment request data.
         """
+
+        _logger().debug(
+            'Received footnote enrichment request.',
+            session_id=request.session_id,
+            survey_title=request.survey_title,
+            reference_id=request.reference_id,
+            reference_document_title=request.reference_document.title,
+            citation_context_info=request.citation_context_info,
+        )
 
         try:
             async with self._enrichment_context_manager.setup_mcp_for_agent_session(
@@ -110,3 +119,7 @@ class Metrics:
             'Time spent on successful footnote enrichment requests.',
             namespace='footnote_enrichment_agent',
         )
+
+        for status in ('success', 'failure'):
+            self.enrichment_requests.labels(status=status)
+            self.improvement_requests.labels(status=status)

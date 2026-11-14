@@ -102,7 +102,8 @@ class DocumentGetter:
             component
             for root_component in root_components
             for path, component in _iter_component(root_component, root_path=root_path)
-            if target_path.startswith(path)
+            # The separator prevents matching siblings with prefixed ids (e.g. `S1` and `S10`).
+            if target_path == path or target_path.startswith(f'{path}/')
         ]
 
 

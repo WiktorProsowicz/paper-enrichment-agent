@@ -299,6 +299,11 @@ class ArxivParser:
         for subfigure_tag in figure_tag.select('.ltx_graphics, table.ltx_tabular'):
             subcaption_tag = subfigure_tag.find_next_sibling(class_='ltx_caption')
 
+            # A subfigure placed directly in the figure is followed by the figure's own caption,
+            # which is not a caption of the subfigure.
+            if subcaption_tag is main_caption:
+                subcaption_tag = None
+
             subcaption = self._decode_caption(subcaption_tag) if subcaption_tag else None
 
             if subfigure_tag.name == 'img':
