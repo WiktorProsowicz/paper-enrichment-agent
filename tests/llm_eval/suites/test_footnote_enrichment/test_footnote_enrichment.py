@@ -9,7 +9,7 @@ from llm_eval import core as harness_core
 from paper_enrichment_agent.common.models import service_conn as conn_models
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common import document_manipulators
-from paper_enrichment_agent.main_survey_enricher.components import arxiv_parser
+from paper_enrichment_agent.paper_scraping_service.components.parsers import arxiv_parser
 from paper_enrichment_agent.common.http_client import HTTPClient
 
 
