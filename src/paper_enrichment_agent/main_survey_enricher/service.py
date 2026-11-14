@@ -63,7 +63,6 @@ class MainSurveyEnricherService:
         self._metrics = metrics
         self._doc_db_client = doc_db_client
         self._rendered_doc_db_client = rendered_doc_db_client
-        # Client of the `footnote_enrichment_agent` service's API.
         self._footnote_agent_client = footnote_agent_client
 
     async def register_arxiv_survey(self, arxiv_id: str, name: str, description: str) -> None:
@@ -508,7 +507,7 @@ class MainSurveyEnricherService:
                 reference_document=referenced_doc,
                 reference_id=citation.component_id,
                 referencing_paragraph=paragraph,
-                citation_context_info=_build_citation_context_info(survey, citation_path),
+                citation_context_info=self._build_citation_context_info(survey, citation_path),
             )
             footnote = await self._footnote_agent_client.apost(
                 '/reference_to_footnote', request, response_schema=doc_models.Section
@@ -574,6 +573,22 @@ class MainSurveyEnricherService:
             raise ValueError(f'Component at path {paragraph_path} is not a paragraph.')
 
         return paragraph, citation
+
+    def _build_citation_context_info(self, survey: doc_models.Document, citation_path: str) -> str:
+        """Describes the location of the citation in the survey for the footnote agent."""
+
+        sections_path = ' > '.join(
+            f"'{component.title}'"
+            for component in document_manipulators.DocumentGetter(survey).get_components_on_path(
+                citation_path
+            )
+            if isinstance(component, doc_models.Section)
+        )
+
+        return (
+            'The document was cited in the section specified by the following path in the '
+            f'document tree: {sections_path}'
+        )
 
     async def _place_images(
         self, environment: SerializationEnvironment, metadata: DocumentMetadata
@@ -679,20 +694,3 @@ class Metrics:
         for status in ('success', 'failure'):
             self.papers_parsed.labels(source='arxiv', status=status)
             self.footnotes_enriched.labels(status=status)
-
-
-def _build_citation_context_info(survey: doc_models.Document, citation_path: str) -> str:
-    """Describes the location of the citation in the survey for the footnote agent."""
-
-    sections_path = ' > '.join(
-        f"'{component.title}'"
-        for component in document_manipulators.DocumentGetter(survey).get_components_on_path(
-            citation_path
-        )
-        if isinstance(component, doc_models.Section)
-    )
-
-    return (
-        'The document was cited in the section specified by the following path in the document '
-        f'tree: {sections_path}'
-    )

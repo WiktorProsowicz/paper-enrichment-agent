@@ -82,7 +82,7 @@ class AppCfg(pydantic.BaseModel):
             min_length=3,
         ),
     ]
-    footnote_enrichment_agent_url: Annotated[
+    footnote_enrichment_service_url: Annotated[
         str,
         Field(description='The base URL of the `footnote_enrichment_agent` service.', min_length=1),
     ]
@@ -236,7 +236,7 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
     )
 
     footnote_agent_client = HTTPClient(
-        base_url=app_cfg.footnote_enrichment_agent_url,
+        base_url=app_cfg.footnote_enrichment_service_url,
         timeout=app_cfg.footnote_enrichment_timeout,
     )
 

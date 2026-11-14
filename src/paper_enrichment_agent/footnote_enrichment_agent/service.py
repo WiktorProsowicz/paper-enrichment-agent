@@ -54,6 +54,15 @@ class FootnoteEnrichmentAgentService:
             request: The footnote enrichment request data.
         """
 
+        _logger().debug(
+            'Received footnote enrichment request.',
+            session_id=request.session_id,
+            survey_title=request.survey_title,
+            reference_id=request.reference_id,
+            reference_document_title=request.reference_document.title,
+            citation_context_info=request.citation_context_info,
+        )
+
         try:
             async with self._enrichment_context_manager.setup_mcp_for_agent_session(
                 request.session_id, request.reference_document
