@@ -13,4 +13,5 @@ persist_dir/
 mlflow.env
 app.env
 llm-eval.env
+marker-api.env
 data/

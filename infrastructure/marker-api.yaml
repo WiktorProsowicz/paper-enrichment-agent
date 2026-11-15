@@ -1,0 +1,91 @@
+---
+name: marker-api
+
+# Standalone PDF conversion stack, meant to run on a separate host with an NVIDIA GPU (requires
+# the NVIDIA Container Toolkit). Only `caddy` publishes a port, bound to the host's loopback, so the
+# API is reached through an SSH tunnel (see the README).
+
+services:
+  # Surya 2.5 VLM served by vLLM, used by marker for OCR of tables, equations and scanned pages.
+  # Arguments mirror the ones `surya` uses when spawning the server itself
+  # (`surya/inference/backends/vllm.py`), except for MTP speculative decoding, which surya enables
+  # only when the checkpoint ships an MTP head (`surya-ocr-2.5` declares `mtp_num_hidden_layers: 0`,
+  # so vLLM fails with `--speculative-config`). Model weights are kept in `hf-cache`.
+  surya-vllm:
+    image: vllm/vllm-openai:v0.25.1
+    restart: unless-stopped
+    command: [datalab-to/surya-ocr-2.5, --served-model-name, datalab-to/surya-ocr-2.5, --dtype, '${VLLM_DTYPE:-bfloat16}', --max-model-len, '24576',
+      --gpu-memory-utilization, '${VLLM_GPU_MEMORY_UTILIZATION:-0.85}', --no-enforce-eager, --enable-prefix-caching, --mm-processor-kwargs, '{"min_pixels": 3136,
+        "max_pixels": 6291456}']
+    environment:
+      # Optional, raises the Hugging Face Hub rate limits for the model download.
+      HF_TOKEN: ${HF_TOKEN:-}
+    ipc: host
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['${VLLM_GPUS:-0}']
+              capabilities: [gpu]
+    healthcheck:
+      test: [CMD, python3, -c, import urllib.request; urllib.request.urlopen('http://localhost:8000/health')]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      # The first start downloads the model weights.
+      start_period: 30m
+    networks:
+      - marker-api-network
+
+  # FastAPI server running PDF conversion. Delegates VLM OCR to
+  # `surya-vllm`; the small in-process models are cached in `marker-models`.
+  marker-api:
+    build:
+      context: ./marker-api
+    image: marker-api:latest
+    restart: unless-stopped
+    environment:
+      SURYA_INFERENCE_URL: http://surya-vllm:8000/v1
+      MARKER_MAX_CONCURRENCY: ${MARKER_MAX_CONCURRENCY:-1}
+    volumes:
+      - marker-models:/models
+    healthcheck:
+      test: [CMD-SHELL, curl -f http://localhost:8000/health || exit 1]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 5m
+    depends_on:
+      surya-vllm:
+        condition: service_healthy
+    networks:
+      - marker-api-network
+
+  # Reverse proxy requiring the `Authorization: Bearer ${MARKER_API_KEY}` header (except for
+  # `/health`). Published on the host's loopback only: Docker-published ports bypass the host
+  # firewall, so binding to all interfaces would expose the plain-HTTP API to the network.
+  caddy:
+    image: caddy:2.10.2
+    restart: unless-stopped
+    environment:
+      MARKER_API_KEY: ${MARKER_API_KEY:?MARKER_API_KEY must be set}
+    ports:
+      - 8080:8080
+    volumes:
+      - ./marker-api/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      marker-api:
+        condition: service_started
+    networks:
+      - marker-api-network
+
+volumes:
+  hf-cache:
+  marker-models:
+
+networks:
+  marker-api-network:
+    name: marker-api-network

@@ -109,3 +109,29 @@ run_llm_eval:
     docker compose -f infrastructure/llm-eval.yaml --env-file llm-eval.env down -v
     docker compose -f infrastructure/llm-eval.yaml --env-file llm-eval.env up \
         --build --attach eval-runner --abort-on-container-exit --exit-code-from eval-runner
+
+# Builds and starts the marker API stack (run on the GPU host)
+setup_marker_api:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Setting up the marker API..."
+
+    if [ ! -f marker-api.env ]; then
+        echo "marker-api.env file not found. Please create it with the necessary environment variables."
+        exit 1
+    fi
+
+    docker compose -f infrastructure/marker-api.yaml --env-file marker-api.env up -d --build
+
+# Stops the marker API stack, keeping the downloaded models
+teardown_marker_api:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Tearing down the marker API..."
+
+    if [ ! -f marker-api.env ]; then
+        echo "marker-api.env file not found. Please create it with the necessary environment variables."
+        exit 1
+    fi
+
+    docker compose -f infrastructure/marker-api.yaml --env-file marker-api.env down

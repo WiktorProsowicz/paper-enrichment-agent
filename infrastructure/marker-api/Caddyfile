@@ -1,0 +1,24 @@
+# Authenticating reverse proxy in front of the marker API.
+:8080 {
+	# Unauthenticated liveness probe.
+	handle /health {
+		reverse_proxy marker-api:8000
+	}
+
+	handle {
+		@unauthorized not header Authorization "Bearer {$MARKER_API_KEY}"
+		respond @unauthorized "Unauthorized" 401
+
+		request_body {
+			max_size 200MB
+		}
+
+		# Conversions of long documents may take minutes.
+		reverse_proxy marker-api:8000 {
+			transport http {
+				read_timeout 30m
+				write_timeout 30m
+			}
+		}
+	}
+}

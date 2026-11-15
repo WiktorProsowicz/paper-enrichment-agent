@@ -40,6 +40,30 @@ service in detail.
 | `prometheus` | Collects and stores the services' metrics. | 9090 |
 | `grafana` | Displays the dashboards. | 3000 |
 
+## Running the Marker API
+
+The [marker](https://github.com/datalab-to/marker) PDF converter runs as a separate stack on a host
+with an NVIDIA GPU (NVIDIA Container Toolkit required), defined in
+[infrastructure/marker-api.yaml](infrastructure/marker-api.yaml).
+
+| Service | Role | Host port |
+| --- | --- | --- |
+| `caddy` | Requires the `Authorization: Bearer <MARKER_API_KEY>` header and proxies to `marker-api`. | 8080 |
+| `marker-api` | Converts the PDFs with marker. | - |
+| `surya-vllm` | Serves the Surya OCR VLM used by marker. | - |
+
+On the GPU host, create `marker-api.env` and run `just setup_marker_api`:
+
+```bash
+MARKER_API_KEY=<long random string, e.g. from `openssl rand -hex 32`>
+# Optional
+VLLM_DTYPE=bfloat16             # use float16 on pre-Ampere GPUs
+VLLM_GPUS=0
+VLLM_GPU_MEMORY_UTILIZATION=0.85
+MARKER_MAX_CONCURRENCY=1
+HF_TOKEN=<Hugging Face token>    # raises the rate limits of the model download
+```
+
 ## Evaluation
 
 ### Footnote Enrichment Agent
