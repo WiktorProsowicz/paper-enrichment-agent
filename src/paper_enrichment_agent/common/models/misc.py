@@ -54,6 +54,18 @@ class SurveyMetadata(pydantic.BaseModel):
     ]
 
 
+class PaperMetadata(pydantic.BaseModel):
+    """Represents the bibliographic metadata of a scraped paper."""
+
+    doi: Annotated[str, Field(description='The DOI of the paper.', min_length=1)]
+    authors: Annotated[
+        list[str], Field(description='The full names of the authors, in the publication order.')
+    ]
+    publication_date: Annotated[
+        datetime.date, Field(description='The date of the first publication of the paper.')
+    ]
+
+
 class SerializedDocFormat(enum.StrEnum):
     """Enumerates the formats documents can be serialized (rendered) into."""
 

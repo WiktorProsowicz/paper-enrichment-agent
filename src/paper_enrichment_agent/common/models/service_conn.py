@@ -12,7 +12,11 @@ import pydantic
 from pydantic import Field
 
 from paper_enrichment_agent.common.models import document as doc_models
-from paper_enrichment_agent.common.models.misc import DocumentMetadata, SerializedDocFormat
+from paper_enrichment_agent.common.models.misc import (
+    DocumentMetadata,
+    PaperMetadata,
+    SerializedDocFormat,
+)
 
 
 class FootnoteEnrichmentRequest(pydantic.BaseModel):
@@ -125,4 +129,22 @@ class SurveyFootnoteEnrichmentRequest(pydantic.BaseModel):
             ),
             min_length=1,
         ),
+    ]
+
+
+class ArxivPaperParsingRequest(pydantic.BaseModel):
+    """Contains request data for scraping and parsing an arXiv paper."""
+
+    arxiv_id: Annotated[
+        str,
+        Field(description='The arXiv ID of the paper to parse, e.g. `1706.03762`.', min_length=1),
+    ]
+
+
+class ParsedPaperResponse(pydantic.BaseModel):
+    """Contains a scraped paper parsed into the document structure, along with its metadata."""
+
+    document: Annotated[doc_models.Document, Field(description='The structure of the paper.')]
+    metadata: Annotated[
+        PaperMetadata, Field(description='The bibliographic metadata of the paper.')
     ]
