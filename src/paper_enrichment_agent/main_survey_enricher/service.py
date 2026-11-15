@@ -23,8 +23,11 @@ from paper_enrichment_agent.common.models.misc import (
     SerializedDocFormat,
     SurveyMetadata,
 )
-from paper_enrichment_agent.common.models.service_conn import FootnoteEnrichmentRequest
-from paper_enrichment_agent.main_survey_enricher.components.arxiv_parser import ArxivParser
+from paper_enrichment_agent.common.models.service_conn import (
+    ArxivPaperParsingRequest,
+    FootnoteEnrichmentRequest,
+    ParsedPaperResponse,
+)
 from paper_enrichment_agent.main_survey_enricher.components.db_clients import (
     rendered_doc_db_client,
 )
@@ -59,18 +62,19 @@ class MainSurveyEnricherService:
         doc_db_client: DocDBClient,
         rendered_doc_db_client: rendered_doc_db_client.RenderedDocDBClient,
         footnote_agent_client: HTTPClient,
+        paper_scraping_client: HTTPClient,
     ) -> None:
 
         self._metrics = metrics
         self._doc_db_client = doc_db_client
         self._rendered_doc_db_client = rendered_doc_db_client
         self._footnote_agent_client = footnote_agent_client
+        self._paper_scraping_client = paper_scraping_client
 
     async def register_arxiv_survey(self, arxiv_id: str, name: str, description: str) -> None:
         """Registers a survey for the given arXiv ID.
 
-        The paper is fetched and parsed in a separate thread, since the parser is synchronous and
-        its HTML parsing is CPU-bound.
+        The paper is downloaded and parsed by the `paper_scraping_service` service.
 
         Args:
             arxiv_id: The arXiv ID of the paper to register a survey for.
@@ -80,7 +84,12 @@ class MainSurveyEnricherService:
 
         try:
             start = time.perf_counter()
-            document = await asyncio.to_thread(ArxivParser().parse, arxiv_id)
+            parsed_paper = await self._paper_scraping_client.apost(
+                '/parse_arxiv_paper',
+                ArxivPaperParsingRequest(arxiv_id=arxiv_id),
+                response_schema=ParsedPaperResponse,
+            )
+            document = parsed_paper.document
             end = time.perf_counter()
 
             _logger().info(
@@ -88,6 +97,7 @@ class MainSurveyEnricherService:
                 arxiv_id=arxiv_id,
                 name=name,
                 description=description,
+                paper_metadata=parsed_paper.metadata,
             )
             self._metrics.papers_parsed.labels(source='arxiv', status='success').inc()
             self._metrics.paper_parsing_time.observe(end - start)
@@ -108,7 +118,7 @@ class MainSurveyEnricherService:
             self._metrics.papers_added.labels(source='arxiv').inc()
             self._metrics.doc_db_operations_time.observe(end - start)
 
-        except ArxivParser.ParsingError as e:
+        except HTTPClient.HTTPClientError as e:
             _logger().error(
                 'Failed to parse the arXiv paper.',
                 arxiv_id=arxiv_id,

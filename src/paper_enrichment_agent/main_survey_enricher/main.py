@@ -100,6 +100,20 @@ class AppCfg(pydantic.BaseModel):
             gt=0,
         ),
     ]
+    paper_scraping_service_url: Annotated[
+        str,
+        Field(description='The base URL of the `paper_scraping_service` service.', min_length=1),
+    ]
+    paper_scraping_timeout: Annotated[
+        float,
+        Field(
+            description=(
+                'The timeout (in seconds) of a single paper parsing request sent to the '
+                '`paper_scraping_service` service. It has to accommodate the paper download.'
+            ),
+            gt=0,
+        ),
+    ]
 
 
 def create_app(service: MainSurveyEnricherService) -> fastapi.FastAPI:
@@ -246,11 +260,16 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
         timeout=app_cfg.footnote_enrichment_timeout,
     )
 
+    paper_scraping_client = HTTPClient(
+        base_url=app_cfg.paper_scraping_service_url, timeout=app_cfg.paper_scraping_timeout
+    )
+
     service = MainSurveyEnricherService(
         metrics=Metrics(),
         doc_db_client=doc_db_client,
         rendered_doc_db_client=rendered_db_client,
         footnote_agent_client=footnote_agent_client,
+        paper_scraping_client=paper_scraping_client,
     )
 
     app = create_app(service=service)
