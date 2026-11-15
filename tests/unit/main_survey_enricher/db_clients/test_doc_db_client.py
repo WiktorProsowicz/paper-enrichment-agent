@@ -230,6 +230,96 @@ class TestAddDocument:
             )
 
 
+def _document_with_image(image_src: str) -> doc_models.Document:
+
+    return doc_models.Document(
+        title='PDF Document',
+        abstract='',
+        description=None,
+        sections=[
+            doc_models.Section(
+                component_id='intro',
+                title='Introduction',
+                components=[
+                    doc_models.Figure(
+                        component_id='figure',
+                        subfigures=[
+                            doc_models.ImgSubfigure(
+                                component_id='image', caption=None, image_src=image_src
+                            )
+                        ],
+                        caption='Figure 1.',
+                    )
+                ],
+            )
+        ],
+        footnotes=[],
+        referenced_papers=[],
+    )
+
+
+class TestAddDocumentWithDataUriImages:
+    @pytest.mark.asyncio
+    async def test_stores_decoded_image_and_rewrites_source(
+        self, doc_db_client, mock_db_client, monkeypatch
+    ):
+
+        get_mock = Mock()
+        monkeypatch.setattr(_REQUESTS_GET_PATH, get_mock)
+        uploaded_contents = []
+
+        async def record_write_stream(path, stream, content_type):
+            uploaded_contents.append(stream.read())
+
+        mock_db_client.write_stream.side_effect = record_write_stream
+        document = _document_with_image('data:image/jpeg;base64,/9j/2Q==')
+
+        doc_meta = await doc_db_client.add_document(
+            document=document, name='PDF Document', description='From PDF'
+        )
+
+        get_mock.assert_not_called()
+        (write_call,) = mock_db_client.write_stream.await_args_list
+        image_path = write_call.kwargs['path']
+        assert image_path.startswith(f'documents/{doc_meta.paper_id}/images/')
+        assert image_path.endswith('.jpeg')
+        assert write_call.kwargs['content_type'] == 'image/jpeg'
+        assert uploaded_contents == [b'\xff\xd8\xff\xd9']
+        assert doc_meta.images == {'/sections/intro/figure/image': image_path}
+
+        stored_document = mock_db_client.upload_model.await_args_list[1].args[0]
+        assert stored_document.sections[0].components[0].subfigures[0].image_src == image_path
+
+    @pytest.mark.parametrize(
+        'image_src',
+        ['data:text/plain;base64,YQ==', 'data:image/png,raw', 'data:image/png;base64,!!!'],
+    )
+    @pytest.mark.asyncio
+    async def test_raises_on_invalid_data_uri(self, doc_db_client, mock_db_client, image_src):
+
+        with pytest.raises(DocDBClient.DocDBClientError, match='data URI'):
+            await doc_db_client.add_document(
+                document=_document_with_image(image_src), name='PDF', description='PDF'
+            )
+
+        mock_db_client.write_stream.assert_not_awaited()
+        mock_db_client.upload_model.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_raises_when_image_upload_fails(self, doc_db_client, mock_db_client):
+
+        mock_db_client.write_stream.side_effect = DBClientException('Upload failed')
+
+        with pytest.raises(
+            DocDBClient.DocDBClientError, match='Failed to upload image to database'
+        ):
+            await doc_db_client.add_document(
+                document=_document_with_image('data:image/png;base64,iVBORw0KGgo='),
+                name='PDF',
+                description='PDF',
+            )
+
+
 class TestRegisterAsSurvey:
     @pytest.mark.asyncio
     async def test_uploads_survey_metadata(self, doc_db_client, mock_db_client):
