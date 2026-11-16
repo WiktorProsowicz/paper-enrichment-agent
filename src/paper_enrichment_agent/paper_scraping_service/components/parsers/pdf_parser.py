@@ -2,7 +2,7 @@
 
 See :class:`~paper_enrichment_agent.common.models.document.Document`. The PDF is downloaded from
 its URL and converted by an external marker API server (`infrastructure/marker-api`), which returns
-the paper as a JSON tree of blocks. The blocks ar then mapped onto the document components.
+the paper as a JSON tree of blocks. The blocks are then mapped onto the document components.
 
 Exported classes:
     MarkerBlock
@@ -61,6 +61,9 @@ class PdfParser:
     parser is built during parsing, therefore a single instance of the parser should be used for
     parsing a single paper. The injected HTTP client may be shared between parser instances.
 
+    The parser builds the skeleton of the document (title, abstract, bibliography, nesting of
+    sections), while the contents of each section are decoded by a new :class:`_SectionDecoder`.
+
     The marker output is mapped as follows:
         - The first section header is the title of the document. The blocks placed between the
           title and the next header (authors, affiliations) are dropped.
@@ -106,17 +109,8 @@ class PdfParser:
     # Blocks not belonging to the main text of the paper
     _SKIPPED_BLOCK_TYPES = frozenset({'PageHeader', 'PageFooter', 'Footnote', 'TableOfContents'})
 
-    # Blocks rendered as images
-    _IMAGE_BLOCK_TYPES = frozenset({'Figure', 'Picture', 'Diagram'})
-
-    # Blocks rendered as plain paragraphs
-    _TEXT_BLOCK_TYPES = frozenset({'Text', 'Code', 'ComplexRegion', 'Handwriting', 'Form'})
-
     # Section numbering such as `2`, `2.1`, `A`, `A.1.1`, optionally followed by a dot
     _SECTION_NUMBER_PATTERN = re.compile(r'^(?:\d+|[A-Z])(?:\.\d+)*\.?(?=\s+\S)')
-
-    # Superscripts that mark footnotes, e.g. `4`, `*`, `†`
-    _FOOTNOTE_MARKER_PATTERN = re.compile(r'^[\d\s,*†‡§¶]+$')
 
     # Labels of numbered bibliography entries, e.g. `[12]`
     _BIB_LABEL_PATTERN = re.compile(r'^\[(\d+)\]\s*')
@@ -194,7 +188,7 @@ class PdfParser:
 
             header = blocks[header_index]
             section_blocks = blocks[header_index + 1 : next_header_index]
-            section_title = self._extract_clean_text(self._to_soup(header.html))
+            section_title = _extract_normalized_text(_parse_block_html(header.html))
             normalized_title = self._strip_section_number(section_title).lower()
 
             if normalized_title in self._ABSTRACT_TITLES and not abstract:
@@ -211,9 +205,11 @@ class PdfParser:
             previous_depth = depth
 
             section = doc_models.Section(
-                component_id=self._to_component_id(header.id),
+                component_id=_block_id_to_component_id(header.id),
                 title=section_title,
-                components=self._decode_section_blocks(section_blocks),
+                components=_SectionDecoder(self._blocks_by_id).decode_section_blocks(
+                    section_blocks
+                ),
             )
 
             while open_sections and open_sections[-1][0] >= depth:
@@ -227,7 +223,7 @@ class PdfParser:
             open_sections.append((depth, section))
 
         return doc_models.Document(
-            title=self._extract_clean_text(self._to_soup(title_header.html)),
+            title=_extract_normalized_text(_parse_block_html(title_header.html)),
             abstract=abstract,
             description=None,
             sections=sections,
@@ -284,10 +280,7 @@ class PdfParser:
             raise self.ParsingError(f'The marker API returned an invalid output: {e}') from e
 
     def _flatten_page_blocks(self, marker_output: MarkerBlock) -> list[MarkerBlock]:
-        """Returns the top-level blocks of all pages in reading order.
-
-        All the blocks, including the members of groups, are registered by their ids.
-        """
+        """Registers all blocks by their ids and returns the top-level page blocks in order."""
 
         def register(block: MarkerBlock) -> None:
             self._blocks_by_id[block.id] = block
@@ -303,10 +296,142 @@ class PdfParser:
             if block.block_type not in self._SKIPPED_BLOCK_TYPES
         ]
 
-    def _decode_section_blocks(
+    def _extract_bibliography(
+        self, blocks: list[MarkerBlock], offset: int
+    ) -> list[tuple[str, str]]:
+        """Extracts the bibliography entries from the blocks of the references section.
+
+        Numbered entries (`[12] ...`) get the id `bib-12`, the others are numbered in order of
+        appearance.
+        """
+
+        bibliography: list[tuple[str, str]] = []
+
+        for block in blocks:
+            soup = _parse_block_html(block.html)
+            entry_tags = soup.find_all('li') or soup.find_all('p')
+
+            for entry_tag in entry_tags:
+                text = _extract_normalized_text(entry_tag)
+                if not text:
+                    continue
+
+                if label_match := self._BIB_LABEL_PATTERN.match(text):
+                    entry_id = f'bib-{label_match.group(1)}'
+                    text = text[label_match.end() :]
+                else:
+                    entry_id = f'bib-{offset + len(bibliography) + 1}'
+
+                bibliography.append((entry_id, text))
+
+        return bibliography
+
+    def _extract_text_of_blocks(self, blocks: list[MarkerBlock]) -> str:
+        """Returns the plain text of the textual blocks, with inline math kept as LaTeX."""
+
+        texts: list[str] = []
+
+        for block in blocks:
+            if block.block_type in _TEXT_BLOCK_TYPES:
+                texts.append(
+                    ''.join(
+                        element
+                        if isinstance(element, str)
+                        else f'${element.expression}$'
+                        if isinstance(element, doc_models.MathExpression)
+                        else element.content_text
+                        for element in _decode_inline_elements(_parse_block_html(block.html))
+                    )
+                )
+
+        return '\n'.join(text for text in texts if text)
+
+    def _get_section_depth(self, header: MarkerBlock, title: str, previous_depth: int) -> int:
+        """Returns the nesting depth (1 = top level) of the section."""
+
+        if number_match := self._SECTION_NUMBER_PATTERN.match(title):
+            return number_match.group(0).rstrip('.').count('.') + 1
+
+        depth = self._depths_by_heading_level.get(self._get_heading_level(header), 1)
+
+        return max(1, min(depth, previous_depth + 1))
+
+    def _infer_depths_by_heading_level(self, headers: list[MarkerBlock]) -> dict[int, int]:
+        """Infers the section depths implied by the heading tags, used for unnumbered headers.
+
+        A heading level used by numbered headers maps to the most common depth of their numbers
+        (e.g. `<h2>` -> 1 if most `<h2>` headers are top-level sections). The remaining levels
+        map to their rank among all the heading levels used in the paper.
+        """
+
+        numbered_depths: dict[int, list[int]] = {}
+
+        for header in headers:
+            title = _extract_normalized_text(_parse_block_html(header.html))
+            if number_match := self._SECTION_NUMBER_PATTERN.match(title):
+                numbered_depths.setdefault(self._get_heading_level(header), []).append(
+                    number_match.group(0).rstrip('.').count('.') + 1
+                )
+
+        levels = sorted({self._get_heading_level(header) for header in headers})
+
+        return {
+            level: (
+                max(set(depths), key=depths.count)
+                if (depths := numbered_depths.get(level))
+                else rank
+            )
+            for rank, level in enumerate(levels, start=1)
+        }
+
+    def _get_heading_level(self, header: MarkerBlock) -> int:
+        """Returns the level of the HTML heading tag of the header (`<h2>` -> 2)."""
+
+        heading_tag = _parse_block_html(header.html).find(re.compile(r'^h[1-6]$'))
+
+        return int(heading_tag.name[1]) if isinstance(heading_tag, bs4.Tag) else 6
+
+    def _strip_section_number(self, title: str) -> str:
+        """Removes the leading section number from the title."""
+
+        return self._SECTION_NUMBER_PATTERN.sub('', title).strip()
+
+    @staticmethod
+    def _get_file_name(pdf_url: str) -> str:
+        """Returns the name of the PDF file sent to the marker API."""
+
+        name = pathlib.PurePosixPath(urllib.parse.urlparse(pdf_url).path).name or 'paper'
+
+        return name if name.endswith('.pdf') else f'{name}.pdf'
+
+
+class _SectionDecoder:
+    """Decodes the marker blocks placed directly under a section header into section components.
+
+    The decoder is synchronous. A new instance is created for each decoded section. It reads the
+    index of all blocks of the parsed paper (used to resolve the members of group blocks), and
+    creates a new :class:`_FigureDecoder` for each decoded figure.
+    """
+
+    # Blocks grouping several visuals with their captions
+    _GROUP_BLOCK_TYPES = frozenset({'FigureGroup', 'TableGroup', 'PictureGroup'})
+
+    def __init__(self, blocks_by_id: dict[str, MarkerBlock]) -> None:
+
+        # Maps the marker block ids to the respective blocks
+        self._blocks_by_id = blocks_by_id
+
+    def decode_section_blocks(
         self, blocks: list[MarkerBlock]
     ) -> list[doc_models.Section.SectionComponent]:
-        """Decodes the blocks placed directly under a section header."""
+        """Decodes the blocks of a section.
+
+        Args:
+            blocks: The blocks placed between the section header and the next header.
+
+        Returns:
+            The decoded section components, in reading order.
+        """
 
         components: list[doc_models.Section.SectionComponent] = []
         pending_visual: MarkerBlock | None = None
@@ -314,8 +439,8 @@ class PdfParser:
         def flush_pending_visual(caption_block: MarkerBlock | None) -> None:
             nonlocal pending_visual
             if pending_visual is not None:
-                figure = self._decode_figure(
-                    f'{self._to_component_id(pending_visual.id)}-figure',
+                figure = _FigureDecoder().decode(
+                    f'{_block_id_to_component_id(pending_visual.id)}-figure',
                     [pending_visual],
                     [caption_block] if caption_block else [],
                 )
@@ -331,20 +456,20 @@ class PdfParser:
 
             flush_pending_visual(None)
 
-            if block.block_type in self._IMAGE_BLOCK_TYPES or block.block_type == 'Table':
+            if block.block_type in _IMAGE_BLOCK_TYPES or block.block_type == 'Table':
                 pending_visual = block
 
-            elif block.block_type in ('FigureGroup', 'TableGroup', 'PictureGroup'):
+            elif block.block_type in self._GROUP_BLOCK_TYPES:
                 members = self._get_group_members(block)
-                figure = self._decode_figure(
-                    self._to_component_id(block.id),
+                figure = _FigureDecoder().decode(
+                    _block_id_to_component_id(block.id),
                     [m for m in members if m.block_type != 'Caption'],
                     [m for m in members if m.block_type == 'Caption'],
                 )
                 if figure is not None:
                     components.append(figure)
 
-            elif block.block_type in self._TEXT_BLOCK_TYPES:
+            elif block.block_type in _TEXT_BLOCK_TYPES:
                 paragraph = self._decode_paragraph(block)
                 if paragraph.elements:
                     self._append_paragraph(components, paragraph)
@@ -382,7 +507,7 @@ class PdfParser:
                 and self._get_page(component.component_id) != self._get_page(paragraph.component_id)
                 and not self._ends_sentence(component)
             ):
-                component.elements = self._merge_strings(
+                component.elements = _merge_inline_strings(
                     [*component.elements, ' ', *paragraph.elements]
                 )
                 return
@@ -409,81 +534,14 @@ class PdfParser:
         """Decodes a text block into a paragraph."""
 
         return doc_models.Paragraph(
-            component_id=self._to_component_id(block.id),
-            elements=self._decode_inline_elements(self._to_soup(block.html)),
+            component_id=_block_id_to_component_id(block.id),
+            elements=_decode_inline_elements(_parse_block_html(block.html)),
         )
-
-    def _decode_inline_elements(
-        self, tag: bs4.Tag
-    ) -> list[doc_models.Paragraph.InlineParagraphElement]:
-        """Decodes the inline contents of the tag into paragraph elements."""
-
-        elements: list[doc_models.Paragraph.InlineParagraphElement] = []
-
-        def visit(node: PageElement) -> None:
-            if isinstance(node, NavigableString):
-                elements.append(str(node))
-
-            elif isinstance(node, bs4.Tag):
-                if node.name == 'math':
-                    elements.append(
-                        doc_models.MathExpression(
-                            expression=node.get_text().strip(), format='LaTeX'
-                        )
-                    )
-
-                elif node.name == 'a' and node.get('href'):
-                    elements.append(
-                        doc_models.Reference(
-                            ref_type='link',
-                            target=str(node['href']),
-                            content_text=self._extract_clean_text(node),
-                        )
-                    )
-
-                elif node.name == 'br':
-                    elements.append(' ')
-
-                elif node.name == 'sup' and self._FOOTNOTE_MARKER_PATTERN.match(node.get_text()):
-                    pass
-
-                else:
-                    # Block-level siblings (e.g. consecutive `<p>`) are separated by spaces
-                    if node.name in ('p', 'li', 'div') and elements:
-                        elements.append(' ')
-                    for child in node.children:
-                        visit(child)
-
-        visit(tag)
-
-        return self._merge_strings(elements)
-
-    def _merge_strings(
-        self, elements: list[doc_models.Paragraph.InlineParagraphElement]
-    ) -> list[doc_models.Paragraph.InlineParagraphElement]:
-        """Merges consecutive strings, normalizes whitespace and strips the paragraph's ends."""
-
-        merged: list[doc_models.Paragraph.InlineParagraphElement] = []
-
-        for is_sequence_of_strings, group in itertools.groupby(
-            elements, key=lambda e: isinstance(e, str)
-        ):
-            if is_sequence_of_strings:
-                merged.append(re.sub(r'\s+', ' ', ''.join(group)))  # type: ignore[arg-type]
-            else:
-                merged.extend(group)
-
-        if merged and isinstance(merged[0], str):
-            merged[0] = merged[0].lstrip()
-        if merged and isinstance(merged[-1], str):
-            merged[-1] = merged[-1].rstrip()
-
-        return [element for element in merged if element != '']
 
     def _decode_equations(self, block: MarkerBlock) -> list[doc_models.MathExpression]:
         """Decodes the display math expressions of an equation block."""
 
-        soup = self._to_soup(block.html)
+        soup = _parse_block_html(block.html)
         expressions = [math.get_text().strip() for math in soup.find_all('math')]
 
         if not expressions:
@@ -491,7 +549,7 @@ class PdfParser:
 
         return [
             doc_models.MathExpression(
-                component_id=self._to_component_id(block.id)
+                component_id=_block_id_to_component_id(block.id)
                 + (f'-{i}' if len(expressions) > 1 else ''),
                 expression=expression,
                 format='LaTeX',
@@ -503,9 +561,9 @@ class PdfParser:
     def _decode_list(self, block: MarkerBlock) -> doc_models.List:
         """Decodes a list group block into a list."""
 
-        soup = self._to_soup(block.html)
+        soup = _parse_block_html(block.html)
         list_tag = soup.find(['ul', 'ol'])
-        component_id = self._to_component_id(block.id)
+        component_id = _block_id_to_component_id(block.id)
 
         decoded_list = doc_models.List(
             component_id=component_id,
@@ -516,7 +574,7 @@ class PdfParser:
         item_tags = soup.find_all('li') or soup.find_all('p')
 
         for i, item_tag in enumerate(item_tags):
-            elements = self._decode_inline_elements(item_tag)
+            elements = _decode_inline_elements(item_tag)
 
             if elements and isinstance(elements[0], str):
                 elements[0] = re.sub(r'^[•\-–∙◦▪]\s*', '', elements[0])
@@ -530,21 +588,42 @@ class PdfParser:
 
         return decoded_list
 
-    def _decode_figure(
+    def _get_group_members(self, group: MarkerBlock) -> list[MarkerBlock]:
+        """Returns the members of a group block in their order of appearance."""
+
+        if group.children:
+            return group.children
+
+        soup = _parse_block_html(group.html)
+
+        return [
+            self._blocks_by_id[str(ref['src'])]
+            for ref in soup.find_all('content-ref')
+            if str(ref.get('src')) in self._blocks_by_id
+        ]
+
+
+class _FigureDecoder:
+    """Decodes image / table marker blocks and their captions into figures.
+
+    The decoder is synchronous. A new instance is created for each decoded figure.
+    """
+
+    def decode(
         self,
         figure_id: str,
         visual_blocks: list[MarkerBlock],
         caption_blocks: list[MarkerBlock],
     ) -> doc_models.Figure | None:
-        """Decodes image / table blocks and their captions into a figure.
+        """Decodes the visual blocks and their captions into a figure.
 
         Args:
             figure_id: The component id of the figure.
-            visual_blocks: The image / table blocks, becoming the subfigures.
-            caption_blocks: The caption blocks, joined into the figure's caption.
+            visual_blocks: The image / table blocks, each becoming a subfigure.
+            caption_blocks: The caption blocks, joined into the caption of the figure.
 
         Returns:
-            The figure, or None if none of the visual blocks could be decoded.
+            The decoded figure, or None if none of the visual blocks yields a subfigure.
         """
 
         subfigures: list[doc_models.TableSubfigure | doc_models.ImgSubfigure] = []
@@ -553,18 +632,18 @@ class PdfParser:
             if block.block_type == 'Table':
                 subfigures.append(
                     doc_models.TableSubfigure(
-                        component_id=self._to_component_id(block.id),
+                        component_id=_block_id_to_component_id(block.id),
                         table_contents=block.html,
                         caption=None,
                     )
                 )
 
-            elif block.block_type in self._IMAGE_BLOCK_TYPES and (
+            elif block.block_type in _IMAGE_BLOCK_TYPES and (
                 image := (block.images or {}).get(block.id)
             ):
                 subfigures.append(
                     doc_models.ImgSubfigure(
-                        component_id=self._to_component_id(block.id),
+                        component_id=_block_id_to_component_id(block.id),
                         image_src=self._to_data_uri(image),
                         caption=None,
                     )
@@ -573,151 +652,25 @@ class PdfParser:
         if not subfigures:
             return None
 
-        caption_elements: list[doc_models.Paragraph.InlineParagraphElement] = []
-        for caption_block in caption_blocks:
-            caption_soup = self._to_soup(caption_block.html)
-            caption_elements.extend([' ', *self._decode_inline_elements(caption_soup)])
-        caption_elements = self._merge_strings(caption_elements)
-
-        caption: doc_models.FigureCaption
-        if all(isinstance(element, str) for element in caption_elements):
-            caption = ''.join(caption_elements)  # type: ignore[arg-type]
-        else:
-            caption = doc_models.Paragraph(elements=caption_elements)
-
         return doc_models.Figure(
             component_id=figure_id,
             subfigures=subfigures,
-            caption=caption,
+            caption=self._decode_caption(caption_blocks),
         )
 
-    def _get_group_members(self, group: MarkerBlock) -> list[MarkerBlock]:
-        """Returns the members of a group block in their order of appearance."""
+    def _decode_caption(self, caption_blocks: list[MarkerBlock]) -> doc_models.FigureCaption:
+        """Joins the caption blocks into a plain string, or a paragraph if they contain markup."""
 
-        if group.children:
-            return group.children
+        caption_elements: list[doc_models.Paragraph.InlineParagraphElement] = []
+        for caption_block in caption_blocks:
+            caption_soup = _parse_block_html(caption_block.html)
+            caption_elements.extend([' ', *_decode_inline_elements(caption_soup)])
+        caption_elements = _merge_inline_strings(caption_elements)
 
-        soup = self._to_soup(group.html)
+        if all(isinstance(element, str) for element in caption_elements):
+            return ''.join(caption_elements)  # type: ignore[arg-type]
 
-        return [
-            self._blocks_by_id[str(ref['src'])]
-            for ref in soup.find_all('content-ref')
-            if str(ref.get('src')) in self._blocks_by_id
-        ]
-
-    def _extract_bibliography(
-        self, blocks: list[MarkerBlock], offset: int
-    ) -> list[tuple[str, str]]:
-        """Extracts the bibliography entries from the blocks of the references section.
-
-        Numbered entries (`[12] ...`) get the id `bib-12`, the others are numbered in order of
-        appearance.
-        """
-
-        bibliography: list[tuple[str, str]] = []
-
-        for block in blocks:
-            soup = self._to_soup(block.html)
-            entry_tags = soup.find_all('li') or soup.find_all('p')
-
-            for entry_tag in entry_tags:
-                text = self._extract_clean_text(entry_tag)
-                if not text:
-                    continue
-
-                if label_match := self._BIB_LABEL_PATTERN.match(text):
-                    entry_id = f'bib-{label_match.group(1)}'
-                    text = text[label_match.end() :]
-                else:
-                    entry_id = f'bib-{offset + len(bibliography) + 1}'
-
-                bibliography.append((entry_id, text))
-
-        return bibliography
-
-    def _extract_text_of_blocks(self, blocks: list[MarkerBlock]) -> str:
-        """Returns the plain text of the textual blocks, with inline math kept as LaTeX."""
-
-        texts: list[str] = []
-
-        for block in blocks:
-            if block.block_type in self._TEXT_BLOCK_TYPES:
-                texts.append(
-                    ''.join(
-                        element
-                        if isinstance(element, str)
-                        else f'${element.expression}$'
-                        if isinstance(element, doc_models.MathExpression)
-                        else element.content_text
-                        for element in self._decode_inline_elements(self._to_soup(block.html))
-                    )
-                )
-
-        return '\n'.join(text for text in texts if text)
-
-    def _get_section_depth(self, header: MarkerBlock, title: str, previous_depth: int) -> int:
-        """Returns the nesting depth (1 = top level) of the section."""
-
-        if number_match := self._SECTION_NUMBER_PATTERN.match(title):
-            return number_match.group(0).rstrip('.').count('.') + 1
-
-        depth = self._depths_by_heading_level.get(self._get_heading_level(header), 1)
-
-        return max(1, min(depth, previous_depth + 1))
-
-    def _infer_depths_by_heading_level(self, headers: list[MarkerBlock]) -> dict[int, int]:
-        """Infers the section depths implied by the heading tags, used for unnumbered headers.
-
-        A heading level used by numbered headers maps to the most common depth of their numbers
-        (e.g. `<h2>` -> 1 if most `<h2>` headers are top-level sections). The remaining levels
-        map to their rank among all the heading levels used in the paper.
-        """
-
-        numbered_depths: dict[int, list[int]] = {}
-
-        for header in headers:
-            title = self._extract_clean_text(self._to_soup(header.html))
-            if number_match := self._SECTION_NUMBER_PATTERN.match(title):
-                numbered_depths.setdefault(self._get_heading_level(header), []).append(
-                    number_match.group(0).rstrip('.').count('.') + 1
-                )
-
-        levels = sorted({self._get_heading_level(header) for header in headers})
-
-        return {
-            level: (
-                max(set(depths), key=depths.count)
-                if (depths := numbered_depths.get(level))
-                else rank
-            )
-            for rank, level in enumerate(levels, start=1)
-        }
-
-    def _get_heading_level(self, header: MarkerBlock) -> int:
-        """Returns the level of the HTML heading tag of the header (`<h2>` -> 2)."""
-
-        heading_tag = self._to_soup(header.html).find(re.compile(r'^h[1-6]$'))
-
-        return int(heading_tag.name[1]) if isinstance(heading_tag, bs4.Tag) else 6
-
-    def _strip_section_number(self, title: str) -> str:
-        """Removes the leading section number from the title."""
-
-        return self._SECTION_NUMBER_PATTERN.sub('', title).strip()
-
-    def _to_soup(self, html: str) -> bs4.BeautifulSoup:
-        return bs4.BeautifulSoup(html, 'html.parser')
-
-    def _extract_clean_text(self, tag: bs4.Tag) -> str:
-        """Extracts clean text from a tag, normalizing the whitespace."""
-
-        return re.sub(r'\s+', ' ', tag.get_text(separator=' ', strip=True)).strip()
-
-    @staticmethod
-    def _to_component_id(block_id: str) -> str:
-        """Converts a marker block id (`/page/6/Figure/3`) into a path-safe component id."""
-
-        return block_id.strip('/').replace('/', '-')
+        return doc_models.Paragraph(elements=caption_elements)
 
     @staticmethod
     def _to_data_uri(image_base64: str) -> str:
@@ -727,10 +680,96 @@ class PdfParser:
 
         return f'data:{mime_type};base64,{image_base64}'
 
-    @staticmethod
-    def _get_file_name(pdf_url: str) -> str:
-        """Returns the name of the PDF file sent to the marker API."""
 
-        name = pathlib.PurePosixPath(urllib.parse.urlparse(pdf_url).path).name or 'paper'
+# Blocks rendered as plain paragraphs
+_TEXT_BLOCK_TYPES = frozenset({'Text', 'Code', 'ComplexRegion', 'Handwriting', 'Form'})
 
-        return name if name.endswith('.pdf') else f'{name}.pdf'
+# Blocks rendered as images
+_IMAGE_BLOCK_TYPES = frozenset({'Figure', 'Picture', 'Diagram'})
+
+
+def _decode_inline_elements(tag: bs4.Tag) -> list[doc_models.Paragraph.InlineParagraphElement]:
+    """Decodes the inline contents of the tag into paragraph elements."""
+
+    elements: list[doc_models.Paragraph.InlineParagraphElement] = []
+
+    def visit(node: PageElement) -> None:
+        if isinstance(node, NavigableString):
+            elements.append(str(node))
+
+        elif isinstance(node, bs4.Tag):
+            if node.name == 'math':
+                elements.append(
+                    doc_models.MathExpression(expression=node.get_text().strip(), format='LaTeX')
+                )
+
+            elif node.name == 'a' and node.get('href'):
+                elements.append(
+                    doc_models.Reference(
+                        ref_type='link',
+                        target=str(node['href']),
+                        content_text=_extract_normalized_text(node),
+                    )
+                )
+
+            elif node.name == 'br':
+                elements.append(' ')
+
+            elif node.name == 'sup' and _FOOTNOTE_MARKER_PATTERN.match(node.get_text()):
+                pass
+
+            else:
+                # Block-level siblings (e.g. consecutive `<p>`) are separated by spaces
+                if node.name in ('p', 'li', 'div') and elements:
+                    elements.append(' ')
+                for child in node.children:
+                    visit(child)
+
+    visit(tag)
+
+    return _merge_inline_strings(elements)
+
+
+# Superscripts that mark footnotes, e.g. `4`, `*`, `†`
+_FOOTNOTE_MARKER_PATTERN = re.compile(r'^[\d\s,*†‡§¶]+$')
+
+
+def _merge_inline_strings(
+    elements: list[doc_models.Paragraph.InlineParagraphElement],
+) -> list[doc_models.Paragraph.InlineParagraphElement]:
+    """Merges consecutive strings, normalizes whitespace and strips the paragraph's ends."""
+
+    merged: list[doc_models.Paragraph.InlineParagraphElement] = []
+
+    for is_sequence_of_strings, group in itertools.groupby(
+        elements, key=lambda e: isinstance(e, str)
+    ):
+        if is_sequence_of_strings:
+            merged.append(re.sub(r'\s+', ' ', ''.join(group)))  # type: ignore[arg-type]
+        else:
+            merged.extend(group)
+
+    if merged and isinstance(merged[0], str):
+        merged[0] = merged[0].lstrip()
+    if merged and isinstance(merged[-1], str):
+        merged[-1] = merged[-1].rstrip()
+
+    return [element for element in merged if element != '']
+
+
+def _extract_normalized_text(tag: bs4.Tag) -> str:
+    """Extracts the text of a tag, collapsing whitespace runs into single spaces."""
+
+    return re.sub(r'\s+', ' ', tag.get_text(separator=' ', strip=True)).strip()
+
+
+def _parse_block_html(html: str) -> bs4.BeautifulSoup:
+    """Parses the HTML snippet of a marker block."""
+
+    return bs4.BeautifulSoup(html, 'html.parser')
+
+
+def _block_id_to_component_id(block_id: str) -> str:
+    """Converts a marker block id (`/page/6/Figure/3`) into a path-safe component id."""
+
+    return block_id.strip('/').replace('/', '-')
