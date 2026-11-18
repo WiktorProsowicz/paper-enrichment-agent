@@ -53,9 +53,13 @@ class AppCfg(pydantic.BaseModel):
             min_length=1,
         ),
     ]
+    ar5iv_html_url_base: Annotated[
+        str,
+        Field(description='The base URL of the ar5iv HTML versions of arXiv papers.', min_length=1),
+    ]
     arxiv_api_timeout: Annotated[
         float,
-        Field(description='The timeout (in seconds) of a single arXiv API request.', gt=0),
+        Field(description='The timeout (in seconds) of a single arXiv / ar5iv request.', gt=0),
     ]
     pdf_parser: Annotated[
         PdfParser.Configuration,
@@ -172,9 +176,6 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
 
     mlflow_setup.setup_mlflow(app_cfg.mlflow_cfg)
 
-    # Shared by the tools of all paper access agent invocations
-    agent_http_client = httpx.AsyncClient()
-
     # Shared by the PDF parsers, each of which parses a single paper
     pdf_http_client = httpx.Client()
 
@@ -185,13 +186,14 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
             **app_cfg.agent_llm_params,
         ),
         cfg=app_cfg.paper_access_agent,
-        http_client=agent_http_client,
     )
 
     service = PaperScrapingService(
         metrics=Metrics(),
         arxiv_metadata_fetcher=ArxivMetadataFetcher(
-            api_url=app_cfg.arxiv_api_url, timeout=app_cfg.arxiv_api_timeout
+            api_url=app_cfg.arxiv_api_url,
+            ar5iv_html_url_base=app_cfg.ar5iv_html_url_base,
+            timeout=app_cfg.arxiv_api_timeout,
         ),
         paper_access_agent=paper_access_agent,
         pdf_parser_factory=lambda: PdfParser(app_cfg.pdf_parser, pdf_http_client),
@@ -199,9 +201,8 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
 
     @contextlib.asynccontextmanager
     async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None, None]:
-        async with agent_http_client:
-            with pdf_http_client:
-                yield
+        with pdf_http_client:
+            yield
 
     app = create_app(service=service, lifespan=lifespan)
 

@@ -2,7 +2,7 @@
 
 The agent is a ReAct agent, which queries external bibliographic services through the
 :class:`~paper_enrichment_agent.paper_scraping_service.components.paper_access_tools.PaperAccessTools`.
-The tools are exposed through an MCP server owned by the agent and connected to in-memory, so no
+The tools are exposed through an MCP server created by the agent and connected to in-memory, so no
 separate server process or endpoint is involved.
 
 Exported classes:
@@ -16,8 +16,6 @@ import enum
 import operator
 import pathlib
 import re
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 from typing import Annotated, Any, TypedDict
 
 import fastmcp
@@ -44,7 +42,6 @@ from paper_enrichment_agent.common import mcp_agent_utils
 from paper_enrichment_agent.common.models import misc as misc_models
 from paper_enrichment_agent.paper_scraping_service.components.paper_access_tools import (
     PaperAccessTools,
-    create_mcp_server,
 )
 
 
@@ -101,9 +98,10 @@ class PaperAccessAgent:
     """The LLM agent resolving citation signatures into paper access information.
 
     In the agentic paradigm context, this is a ReAct agent, which consists of a simple
-    reason + tool execution loop. The agent owns its tools: for each invocation, a fresh MCP server
-    exposing the tools is created and connected to in-memory, before the agent graph is run. The
-    tools share the injected HTTP client, so the agent may be invoked concurrently.
+    reason + tool execution loop. For each invocation, fresh tools are created from the
+    configuration, with their own HTTP client, and exposed through an MCP server connected to
+    in-memory, before the agent graph is run. The tools and their HTTP client are torn down when
+    the invocation finishes, so concurrent invocations share no state.
 
     The agent raises `PaperAccessAgentError` if it does not finish within the recursion limit or
     its final answer cannot be decoded.
@@ -127,7 +125,7 @@ class PaperAccessAgent:
         ]
         tools: Annotated[
             PaperAccessTools.Configuration,
-            Field(description='The configuration of the tools used by the agent.'),
+            Field(description='The configuration of the tools created for each invocation.'),
         ]
 
     _PROMPT_TEMPLATES_PATH = pathlib.Path(__file__).parent / 'prompt_templates'
@@ -139,13 +137,10 @@ class PaperAccessAgent:
         PaperAccessInfo | None
     )
 
-    def __init__(
-        self, llm: ChatLiteLLM, cfg: Configuration, http_client: httpx.AsyncClient
-    ) -> None:
+    def __init__(self, llm: ChatLiteLLM, cfg: Configuration) -> None:
 
         self._llm = llm
         self._cfg = cfg
-        self._http_client = http_client
 
         self._prompt_template = ChatPromptTemplate.from_messages(
             [
@@ -201,7 +196,13 @@ class PaperAccessAgent:
             citation_signature=citation_signature,
         )
 
-        async with self._setup_mcp_session() as mcp_session:
+        async with (
+            httpx.AsyncClient() as http_client,
+            fastmcp.Client(
+                PaperAccessTools.create(self._cfg.tools, http_client).as_mcp_server()
+            ) as mcp_client,
+        ):
+            mcp_session = mcp_client.session
             mcp_tools = (await mcp_session.list_tools()).tools
             llm_with_tools = self._llm.bind_tools(
                 mcp_agent_utils.mcp_tools_to_llm_functions(mcp_tools), tool_choice='auto'
@@ -268,15 +269,6 @@ class PaperAccessAgent:
             )
 
         return 'call_tool' if last_message.tool_calls else 'finish'
-
-    @asynccontextmanager
-    async def _setup_mcp_session(self) -> AsyncGenerator[mcp.ClientSession, None]:
-        """Creates the MCP server exposing the tools and connects to it in-memory."""
-
-        mcp_server = create_mcp_server(PaperAccessTools(self._cfg.tools, self._http_client))
-
-        async with fastmcp.Client(mcp_server) as mcp_client:
-            yield mcp_client.session
 
     def _decode_final_answer(self, answer: str) -> PaperAccessInfo | None:
         """Decodes the final answer of the agent into the paper access information."""
