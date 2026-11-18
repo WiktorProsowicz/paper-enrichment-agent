@@ -5,23 +5,32 @@ communication. The service downloads papers from external sources and parses the
 structured document format.
 """
 
+import contextlib
 import functools
 import pathlib
-from typing import Annotated
+from collections.abc import AsyncGenerator, Callable
+from typing import Annotated, Any
 
 import fastapi
+import httpx
 import hydra
+import mlflow
 import omegaconf
 import prometheus_client
 import pydantic
 import uvicorn
+from langchain_litellm import ChatLiteLLM
 from pydantic import Field
 
-from paper_enrichment_agent.common import logging_setup
+from paper_enrichment_agent.common import logging_setup, mlflow_setup
 from paper_enrichment_agent.common.models import service_conn as conn_models
 from paper_enrichment_agent.paper_scraping_service.components.fetchers import (
     ArxivMetadataFetcher,
 )
+from paper_enrichment_agent.paper_scraping_service.components.paper_access_agent import (
+    PaperAccessAgent,
+)
+from paper_enrichment_agent.paper_scraping_service.components.parsers.pdf_parser import PdfParser
 from paper_enrichment_agent.paper_scraping_service.service import Metrics, PaperScrapingService
 
 
@@ -48,9 +57,47 @@ class AppCfg(pydantic.BaseModel):
         float,
         Field(description='The timeout (in seconds) of a single arXiv API request.', gt=0),
     ]
+    pdf_parser: Annotated[
+        PdfParser.Configuration,
+        Field(description='Configuration of the PDF parser, including the marker API access.'),
+    ]
+    mlflow_cfg: Annotated[
+        mlflow_setup.MLFlowConfig,
+        Field(description='Configuration of the MLflow tracing.'),
+    ]
+    paper_access_agent: Annotated[
+        PaperAccessAgent.Configuration,
+        Field(description='Configuration of the paper access agent, including its tools.'),
+    ]
+    agent_llm_model: Annotated[
+        str,
+        Field(
+            description=(
+                'The LiteLLM-supported model signature of the LLM used by the paper access agent.'
+            ),
+            min_length=1,
+        ),
+    ]
+    agent_llm_params: Annotated[
+        dict[str, Any],
+        Field(
+            description=(
+                'The model-specific parameters of the LLM used by the paper access agent. '
+                'The params are passed to the LiteLLM constructor.'
+            )
+        ),
+    ]
+    llm_api_key: Annotated[
+        pydantic.SecretStr,
+        Field(description='The API key for the LLM used by the paper access agent.', min_length=1),
+    ]
 
 
-def create_app(service: PaperScrapingService) -> fastapi.FastAPI:
+def create_app(
+    service: PaperScrapingService,
+    lifespan: Callable[[fastapi.FastAPI], contextlib.AbstractAsyncContextManager[None]]
+    | None = None,
+) -> fastapi.FastAPI:
     """Creates a FastAPI application for the `paper_scraping_service` service.
 
     Each endpoint is named after the `PaperScrapingService` method it delegates to. Service errors
@@ -58,12 +105,13 @@ def create_app(service: PaperScrapingService) -> fastapi.FastAPI:
 
     Args:
         service: The service handling the requests.
+        lifespan: The lifespan of the app, managing the resources shared by the components.
 
     Returns:
         The configured FastAPI application.
     """
 
-    app = fastapi.FastAPI(title='Paper Scraping Service')
+    app = fastapi.FastAPI(title='Paper Scraping Service', lifespan=lifespan)
 
     app.mount('/metrics', prometheus_client.make_asgi_app())
 
@@ -77,11 +125,37 @@ def create_app(service: PaperScrapingService) -> fastapi.FastAPI:
     async def health() -> dict[str, str]:
         return {'status': 'ok'}
 
+    @app.middleware('http')
+    async def mlflow_trace_context(request: fastapi.Request, call_next):  # type: ignore
+
+        headers = dict(request.headers)
+
+        if 'traceparent' in headers:
+            with mlflow.tracing.set_tracing_context_from_http_request_headers(headers):
+                response = await call_next(request)
+
+        else:
+            response = await call_next(request)
+
+        return response
+
     @app.post('/parse_arxiv_paper')
     async def parse_arxiv_paper(
         request: conn_models.ArxivPaperParsingRequest,
     ) -> conn_models.ParsedPaperResponse:
         document, metadata = await service.parse_arxiv_paper(request.arxiv_id)
+        return conn_models.ParsedPaperResponse(document=document, metadata=metadata)
+
+    @app.post('/parse_paper_from_citation_signature')
+    async def parse_paper_from_citation_signature(
+        request: conn_models.CitationSignatureParsingRequest,
+    ) -> conn_models.ParsedPaperResponse | None:
+        parsed_paper = await service.parse_paper_from_citation_signature(request.citation_signature)
+
+        if parsed_paper is None:
+            return None
+
+        document, metadata = parsed_paper
         return conn_models.ParsedPaperResponse(document=document, metadata=metadata)
 
     return app
@@ -96,14 +170,40 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
     logging_setup.setup_logging(app_cfg.json_logs_path)
     _logger().info('Running paper_scraping_service service', cfg=app_cfg)
 
+    mlflow_setup.setup_mlflow(app_cfg.mlflow_cfg)
+
+    # Shared by the tools of all paper access agent invocations
+    agent_http_client = httpx.AsyncClient()
+
+    # Shared by the PDF parsers, each of which parses a single paper
+    pdf_http_client = httpx.Client()
+
+    paper_access_agent = PaperAccessAgent(
+        llm=ChatLiteLLM(
+            model=app_cfg.agent_llm_model,
+            api_key=app_cfg.llm_api_key.get_secret_value(),
+            **app_cfg.agent_llm_params,
+        ),
+        cfg=app_cfg.paper_access_agent,
+        http_client=agent_http_client,
+    )
+
     service = PaperScrapingService(
         metrics=Metrics(),
         arxiv_metadata_fetcher=ArxivMetadataFetcher(
             api_url=app_cfg.arxiv_api_url, timeout=app_cfg.arxiv_api_timeout
         ),
+        paper_access_agent=paper_access_agent,
+        pdf_parser_factory=lambda: PdfParser(app_cfg.pdf_parser, pdf_http_client),
     )
 
-    app = create_app(service=service)
+    @contextlib.asynccontextmanager
+    async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None, None]:
+        async with agent_http_client:
+            with pdf_http_client:
+                yield
+
+    app = create_app(service=service, lifespan=lifespan)
 
     uvicorn.run(app, host='0.0.0.0', port=app_cfg.app_port)
 

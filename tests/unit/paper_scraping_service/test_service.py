@@ -1,5 +1,5 @@
 import datetime
-from unittest.mock import MagicMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import prometheus_client
 import pytest
@@ -9,13 +9,37 @@ from paper_enrichment_agent.common.models.misc import PaperMetadata
 from paper_enrichment_agent.paper_scraping_service.components.fetchers import (
     ArxivMetadataFetcher,
 )
+from paper_enrichment_agent.paper_scraping_service.components.paper_access_agent import (
+    PaperAccessAgent,
+    PaperAccessInfo,
+    PaperAccessType,
+)
 from paper_enrichment_agent.paper_scraping_service.components.parsers.arxiv_parser import (
     ArxivParser,
 )
+from paper_enrichment_agent.paper_scraping_service.components.parsers.pdf_parser import PdfParser
 from paper_enrichment_agent.paper_scraping_service import service as service_module
 from paper_enrichment_agent.paper_scraping_service.service import PaperScrapingService
 
 SAMPLE_ARXIV_ID = '1905.09263'
+SAMPLE_PDF_URL = 'https://example.org/paper.pdf'
+SAMPLE_CITATION = 'A. Author and B. Author. A sample paper. In Proceedings, 2019.'
+
+
+def create_service(
+    metrics: MagicMock,
+    fetcher: MagicMock,
+    paper_access_agent: MagicMock | None = None,
+    pdf_parser: MagicMock | None = None,
+) -> PaperScrapingService:
+    """Creates the service, mocking the dependencies not used by the test."""
+
+    return PaperScrapingService(
+        metrics=metrics,
+        arxiv_metadata_fetcher=fetcher,
+        paper_access_agent=paper_access_agent or MagicMock(spec=PaperAccessAgent),
+        pdf_parser_factory=Mock(return_value=pdf_parser or MagicMock(spec=PdfParser)),
+    )
 
 
 @pytest.fixture
@@ -89,7 +113,7 @@ class TestParseArxivPaper:
         self, patch_arxiv_parser, mock_fetcher, mock_metrics, sample_document, sample_metadata
     ):
 
-        service = PaperScrapingService(metrics=mock_metrics, arxiv_metadata_fetcher=mock_fetcher)
+        service = create_service(mock_metrics, mock_fetcher)
 
         document, metadata = await service.parse_arxiv_paper(SAMPLE_ARXIV_ID)
 
@@ -101,7 +125,7 @@ class TestParseArxivPaper:
     @pytest.mark.asyncio
     async def test_reports_metrics_on_success(self, patch_arxiv_parser, mock_fetcher, mock_metrics):
 
-        service = PaperScrapingService(metrics=mock_metrics, arxiv_metadata_fetcher=mock_fetcher)
+        service = create_service(mock_metrics, mock_fetcher)
 
         await service.parse_arxiv_paper(SAMPLE_ARXIV_ID)
 
@@ -118,7 +142,7 @@ class TestParseArxivPaper:
 
         patch_arxiv_parser.parse.side_effect = ArxivParser.ParsingError('Parsing failed')
 
-        service = PaperScrapingService(metrics=mock_metrics, arxiv_metadata_fetcher=mock_fetcher)
+        service = create_service(mock_metrics, mock_fetcher)
 
         with pytest.raises(
             PaperScrapingService.PaperScrapingError,
@@ -133,7 +157,7 @@ class TestParseArxivPaper:
 
         mock_fetcher.fetch.side_effect = ArxivMetadataFetcher.FetchingError('Fetching failed')
 
-        service = PaperScrapingService(metrics=mock_metrics, arxiv_metadata_fetcher=mock_fetcher)
+        service = create_service(mock_metrics, mock_fetcher)
 
         with pytest.raises(
             PaperScrapingService.PaperScrapingError,
@@ -146,7 +170,7 @@ class TestParseArxivPaper:
 
         mock_fetcher.fetch.side_effect = ArxivMetadataFetcher.FetchingError('Fetching failed')
 
-        service = PaperScrapingService(metrics=mock_metrics, arxiv_metadata_fetcher=mock_fetcher)
+        service = create_service(mock_metrics, mock_fetcher)
 
         with pytest.raises(PaperScrapingService.PaperScrapingError):
             await service.parse_arxiv_paper(SAMPLE_ARXIV_ID)
@@ -162,10 +186,171 @@ class TestParseArxivPaper:
 
         mock_fetcher.fetch.side_effect = RuntimeError('Unexpected failure')
 
-        service = PaperScrapingService(metrics=mock_metrics, arxiv_metadata_fetcher=mock_fetcher)
+        service = create_service(mock_metrics, mock_fetcher)
 
         with pytest.raises(RuntimeError, match='Unexpected failure'):
             await service.parse_arxiv_paper(SAMPLE_ARXIV_ID)
+
+
+class TestParsePaperFromCitationSignature:
+    @pytest.fixture
+    def mock_access_agent(self, sample_metadata) -> MagicMock:
+
+        return MagicMock(
+            spec=PaperAccessAgent,
+            invoke=AsyncMock(
+                return_value=PaperAccessInfo(
+                    type=PaperAccessType.ARXIV, source=SAMPLE_ARXIV_ID, metadata=sample_metadata
+                )
+            ),
+        )
+
+    @pytest.fixture
+    def mock_pdf_parser(self, sample_document) -> MagicMock:
+
+        return MagicMock(spec=PdfParser, parse=Mock(return_value=sample_document))
+
+    @pytest.fixture
+    def service(
+        self, mock_metrics, mock_fetcher, mock_access_agent, mock_pdf_parser
+    ) -> PaperScrapingService:
+
+        return create_service(mock_metrics, mock_fetcher, mock_access_agent, mock_pdf_parser)
+
+    @pytest.fixture
+    def pdf_access(self, mock_access_agent, sample_metadata) -> None:
+
+        mock_access_agent.invoke.return_value = PaperAccessInfo(
+            type=PaperAccessType.PDF, source=SAMPLE_PDF_URL, metadata=sample_metadata
+        )
+
+    @pytest.mark.asyncio
+    async def test_parses_arxiv_paper(
+        self,
+        service,
+        patch_arxiv_parser,
+        mock_access_agent,
+        mock_pdf_parser,
+        mock_fetcher,
+        sample_document,
+        sample_metadata,
+    ):
+
+        result = await service.parse_paper_from_citation_signature(SAMPLE_CITATION)
+
+        assert result == (sample_document, sample_metadata)
+        mock_access_agent.invoke.assert_awaited_once_with(SAMPLE_CITATION)
+        patch_arxiv_parser.parse.assert_called_once_with(SAMPLE_ARXIV_ID)
+        mock_pdf_parser.parse.assert_not_called()
+        mock_fetcher.fetch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_parses_pdf_paper(
+        self,
+        service,
+        pdf_access,
+        patch_arxiv_parser,
+        mock_pdf_parser,
+        sample_document,
+        sample_metadata,
+    ):
+
+        result = await service.parse_paper_from_citation_signature(SAMPLE_CITATION)
+
+        assert result == (sample_document, sample_metadata)
+        mock_pdf_parser.parse.assert_called_once_with(SAMPLE_PDF_URL)
+        patch_arxiv_parser.parse.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_public_version_is_found(
+        self, service, patch_arxiv_parser, mock_access_agent, mock_metrics
+    ):
+
+        mock_access_agent.invoke.return_value = None
+
+        assert await service.parse_paper_from_citation_signature(SAMPLE_CITATION) is None
+
+        patch_arxiv_parser.parse.assert_not_called()
+        mock_metrics.paper_access_resolutions.labels.assert_called_once_with(result='not_found')
+        mock_metrics.paper_access_resolutions.labels.return_value.inc.assert_called_once()
+        mock_metrics.papers_parsed.labels.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_reports_metrics_on_success(
+        self, service, pdf_access, mock_pdf_parser, mock_metrics
+    ):
+
+        await service.parse_paper_from_citation_signature(SAMPLE_CITATION)
+
+        mock_metrics.paper_access_resolutions.labels.assert_called_once_with(result='pdf')
+        mock_metrics.paper_access_resolutions.labels.return_value.inc.assert_called_once()
+        assert mock_metrics.paper_access_resolution_time.observe.call_count == 1
+
+        mock_metrics.papers_parsed.labels.assert_called_once_with(source='pdf', status='success')
+        mock_metrics.papers_parsed.labels.return_value.inc.assert_called_once()
+        mock_metrics.paper_parsing_time.labels.assert_called_once_with(source='pdf')
+        observe = mock_metrics.paper_parsing_time.labels.return_value.observe
+        assert observe.call_count == 1
+        assert observe.call_args.args[0] >= 0
+
+    @pytest.mark.asyncio
+    async def test_raises_when_agent_fails(self, service, mock_access_agent, mock_metrics):
+
+        mock_access_agent.invoke.side_effect = PaperAccessAgent.PaperAccessAgentError(
+            'Recursion limit'
+        )
+
+        with pytest.raises(
+            PaperScrapingService.PaperScrapingError,
+            match=f'Failed to find the paper cited as "{SAMPLE_CITATION}": Recursion limit',
+        ):
+            await service.parse_paper_from_citation_signature(SAMPLE_CITATION)
+
+        mock_metrics.paper_access_resolutions.labels.assert_called_once_with(result='failure')
+        mock_metrics.paper_access_resolutions.labels.return_value.inc.assert_called_once()
+        mock_metrics.papers_parsed.labels.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_raises_when_arxiv_parsing_fails(self, service, patch_arxiv_parser, mock_metrics):
+
+        patch_arxiv_parser.parse.side_effect = ArxivParser.ParsingError('Parsing failed')
+
+        with pytest.raises(PaperScrapingService.PaperScrapingError, match='Parsing failed'):
+            await service.parse_paper_from_citation_signature(SAMPLE_CITATION)
+
+        mock_metrics.papers_parsed.labels.assert_called_once_with(source='arxiv', status='failure')
+        mock_metrics.papers_parsed.labels.return_value.inc.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_raises_when_pdf_parsing_fails(
+        self, service, pdf_access, mock_pdf_parser, mock_metrics
+    ):
+
+        mock_pdf_parser.parse.side_effect = PdfParser.ParsingError('Conversion failed')
+
+        with pytest.raises(PaperScrapingService.PaperScrapingError, match='Conversion failed'):
+            await service.parse_paper_from_citation_signature(SAMPLE_CITATION)
+
+        mock_metrics.papers_parsed.labels.assert_called_once_with(source='pdf', status='failure')
+        assert mock_metrics.paper_parsing_time.labels.return_value.observe.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_does_not_swallow_unexpected_errors(self, service, mock_access_agent):
+
+        mock_access_agent.invoke.side_effect = RuntimeError('Unexpected failure')
+
+        with pytest.raises(RuntimeError, match='Unexpected failure'):
+            await service.parse_paper_from_citation_signature(SAMPLE_CITATION)
+
+    @pytest.mark.asyncio
+    async def test_does_not_swallow_unexpected_parser_errors(
+        self, service, pdf_access, mock_pdf_parser
+    ):
+
+        mock_pdf_parser.parse.side_effect = RuntimeError('Unexpected failure')
+
+        with pytest.raises(RuntimeError, match='Unexpected failure'):
+            await service.parse_paper_from_citation_signature(SAMPLE_CITATION)
 
 
 class TestMetrics:
@@ -197,3 +382,20 @@ class TestMetrics:
             )
             == 0
         )
+
+        for source in ('arxiv', 'pdf'):
+            assert (
+                registry.get_sample_value(
+                    'paper_scraping_service_papers_parsed_total',
+                    {'source': source, 'status': 'failure'},
+                )
+                == 0
+            )
+
+        for result in ('arxiv', 'pdf', 'not_found', 'failure'):
+            assert (
+                registry.get_sample_value(
+                    'paper_scraping_service_paper_access_resolutions_total', {'result': result}
+                )
+                == 0
+            )

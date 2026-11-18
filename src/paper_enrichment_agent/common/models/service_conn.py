@@ -148,3 +148,18 @@ class ParsedPaperResponse(pydantic.BaseModel):
     metadata: Annotated[
         PaperMetadata, Field(description='The bibliographic metadata of the paper.')
     ]
+
+
+class CitationSignatureParsingRequest(pydantic.BaseModel):
+    """Contains request data for finding, scraping and parsing a paper by its citation."""
+
+    citation_signature: Annotated[
+        str,
+        Field(
+            description=(
+                'The citation signature of the paper, as found in the bibliography of the citing '
+                'paper, e.g. `A. Vaswani et al. Attention is all you need. NeurIPS, 2017.`.'
+            ),
+            min_length=1,
+        ),
+    ]
