@@ -34,6 +34,7 @@ service in detail.
 | --- | --- | --- |
 | `main-survey-enricher` | Serves the user-facing API. | 8082 |
 | `footnote-enrichment-agent` | Composes footnotes from the cited papers. | - |
+| `paper-scraping-service` | Fetches and parses scientific papers. | - |
 | `s3-database` | Stores the documents (`document-database` bucket) and their rendered archives (`rendered-documents` bucket). The filer UI at `localhost:8888/buckets/` lets you browse them. | 8888 (localhost only) |
 | `alloy` | Ships the services' logs to Loki. | - |
 | `loki` | Stores the logs. | 3100 |
