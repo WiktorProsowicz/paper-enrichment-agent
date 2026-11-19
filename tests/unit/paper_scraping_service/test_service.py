@@ -6,14 +6,16 @@ import prometheus_client
 import pytest
 
 from paper_enrichment_agent.common.models import document as doc_models
-from paper_enrichment_agent.common.models.misc import PaperMetadata
+from paper_enrichment_agent.common.models.misc import (
+    PaperAccessInfo,
+    PaperAccessType,
+    PaperMetadata,
+)
 from paper_enrichment_agent.paper_scraping_service.components.fetchers import (
     ArxivMetadataFetcher,
 )
 from paper_enrichment_agent.paper_scraping_service.components.paper_access_agent import (
     PaperAccessAgent,
-    PaperAccessInfo,
-    PaperAccessType,
 )
 from paper_enrichment_agent.paper_scraping_service.components.parsers.arxiv_parser import (
     ArxivParser,
@@ -199,6 +201,92 @@ class TestParseArxivPaper:
             await service.parse_arxiv_paper(SAMPLE_ARXIV_ID)
 
 
+class TestResolvePaperAccess:
+    @pytest.fixture
+    def access_info(self, sample_metadata) -> PaperAccessInfo:
+
+        return PaperAccessInfo(
+            type=PaperAccessType.ARXIV, source=SAMPLE_ARXIV_ID, metadata=sample_metadata
+        )
+
+    @pytest.fixture
+    def mock_access_agent(self, access_info) -> MagicMock:
+
+        return MagicMock(spec=PaperAccessAgent, invoke=AsyncMock(return_value=access_info))
+
+    @pytest.fixture
+    def service(self, mock_metrics, mock_fetcher, mock_access_agent) -> PaperScrapingService:
+
+        return create_service(mock_metrics, mock_fetcher, mock_access_agent)
+
+    @pytest.mark.asyncio
+    async def test_returns_access_info(
+        self, service, patch_arxiv_parser, mock_access_agent, mock_fetcher, access_info
+    ):
+
+        assert await service.resolve_paper_access(SAMPLE_CITATION) == access_info
+
+        mock_access_agent.invoke.assert_awaited_once_with(SAMPLE_CITATION)
+        patch_arxiv_parser.parse.assert_not_called()
+        mock_fetcher.fetch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_public_version_is_found(
+        self, service, mock_access_agent, mock_metrics
+    ):
+
+        mock_access_agent.invoke.return_value = None
+
+        assert await service.resolve_paper_access(SAMPLE_CITATION) is None
+
+        mock_metrics.paper_access_resolutions.labels.assert_called_once_with(result='not_found')
+        mock_metrics.paper_access_resolutions.labels.return_value.inc.assert_called_once()
+
+    @pytest.mark.parametrize('access_type', list(PaperAccessType))
+    @pytest.mark.asyncio
+    async def test_reports_metrics_on_success(
+        self, service, mock_access_agent, mock_metrics, access_info, access_type
+    ):
+
+        mock_access_agent.invoke.return_value = access_info.model_copy(update={'type': access_type})
+
+        await service.resolve_paper_access(SAMPLE_CITATION)
+
+        mock_metrics.paper_access_resolutions.labels.assert_called_once_with(
+            result=access_type.value
+        )
+        mock_metrics.paper_access_resolutions.labels.return_value.inc.assert_called_once()
+        observe = mock_metrics.paper_access_resolution_time.observe
+        assert observe.call_count == 1
+        assert observe.call_args.args[0] >= 0
+        mock_metrics.papers_parsed.labels.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_raises_when_agent_fails(self, service, mock_access_agent, mock_metrics):
+
+        mock_access_agent.invoke.side_effect = PaperAccessAgent.PaperAccessAgentError(
+            'Recursion limit'
+        )
+
+        with pytest.raises(
+            PaperScrapingService.PaperScrapingError,
+            match=f'Failed to find the paper cited as "{SAMPLE_CITATION}": Recursion limit',
+        ):
+            await service.resolve_paper_access(SAMPLE_CITATION)
+
+        mock_metrics.paper_access_resolutions.labels.assert_called_once_with(result='failure')
+        mock_metrics.paper_access_resolutions.labels.return_value.inc.assert_called_once()
+        mock_metrics.paper_access_resolution_time.observe.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_does_not_swallow_unexpected_errors(self, service, mock_access_agent):
+
+        mock_access_agent.invoke.side_effect = RuntimeError('Unexpected failure')
+
+        with pytest.raises(RuntimeError, match='Unexpected failure'):
+            await service.resolve_paper_access(SAMPLE_CITATION)
+
+
 class TestParsePaperFromCitationSignature:
     @pytest.fixture
     def mock_access_agent(self, sample_metadata) -> MagicMock:
@@ -342,10 +430,6 @@ class TestParsePaperFromCitationSignature:
     ):
 
         await service.parse_paper_from_citation_signature(SAMPLE_CITATION)
-
-        mock_metrics.paper_access_resolutions.labels.assert_called_once_with(result='pdf')
-        mock_metrics.paper_access_resolutions.labels.return_value.inc.assert_called_once()
-        assert mock_metrics.paper_access_resolution_time.observe.call_count == 1
 
         mock_metrics.papers_parsed.labels.assert_called_once_with(source='pdf', status='success')
         mock_metrics.papers_parsed.labels.return_value.inc.assert_called_once()

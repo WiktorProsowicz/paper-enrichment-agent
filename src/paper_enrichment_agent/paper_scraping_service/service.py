@@ -20,7 +20,6 @@ from paper_enrichment_agent.paper_scraping_service.components.fetchers import (
 )
 from paper_enrichment_agent.paper_scraping_service.components.paper_access_agent import (
     PaperAccessAgent,
-    PaperAccessType,
 )
 from paper_enrichment_agent.paper_scraping_service.components.parsers.arxiv_parser import (
     ArxivParser,
@@ -106,27 +105,24 @@ class PaperScrapingService:
                 f'Failed to parse the arXiv paper with ID {arxiv_id}: {e}'
             ) from e
 
-    async def parse_paper_from_citation_signature(
+    async def resolve_paper_access(
         self, citation_signature: str
-    ) -> tuple[doc_models.Document, misc_models.PaperMetadata] | None:
-        """Finds a public version of a cited paper and parses it into the document structure.
+    ) -> misc_models.PaperAccessInfo | None:
+        """Finds the best public source of a cited paper and its bibliographic metadata.
 
-        The paper access agent identifies the paper and its bibliographic metadata, and picks its
-        best public source: the HTML version on arXiv, or an open access PDF. The paper is then
-        parsed by the respective parser in a separate thread, as the parsers are synchronous. A PDF
-        paper is parsed by a new parser with its own HTTP client.
+        The paper access agent identifies the paper and picks its best public source: the HTML
+        version on arXiv, or an open access PDF. The paper itself is not downloaded.
 
         Args:
             citation_signature: The citation signature of the paper, as found in the bibliography
                 of the citing paper.
 
         Returns:
-            The parsed document and the metadata of the paper, or None if no public version of the
-            paper was found.
+            The access information of the paper, or None if no public version of the paper was
+            found.
 
         Raises:
-            PaperScrapingError: If the access information of the paper cannot be resolved, or the
-                paper cannot be downloaded or parsed.
+            PaperScrapingError: If the access information of the paper cannot be resolved.
         """
 
         try:
@@ -162,13 +158,42 @@ class PaperScrapingService:
         )
         self._metrics.paper_access_resolutions.labels(result=access_info.type.value).inc()
 
+        return access_info
+
+    async def parse_paper_from_citation_signature(
+        self, citation_signature: str
+    ) -> tuple[doc_models.Document, misc_models.PaperMetadata] | None:
+        """Finds a public version of a cited paper and parses it into the document structure.
+
+        The best public source of the paper is resolved with :meth:`resolve_paper_access`. The
+        paper is then parsed by the respective parser in a separate thread, as the parsers are
+        synchronous. A PDF paper is parsed by a new parser with its own HTTP client.
+
+        Args:
+            citation_signature: The citation signature of the paper, as found in the bibliography
+                of the citing paper.
+
+        Returns:
+            The parsed document and the metadata of the paper, or None if no public version of the
+            paper was found.
+
+        Raises:
+            PaperScrapingError: If the access information of the paper cannot be resolved, or the
+                paper cannot be downloaded or parsed.
+        """
+
+        access_info = await self.resolve_paper_access(citation_signature)
+
+        if access_info is None:
+            return None
+
         try:
             start = time.perf_counter()
 
             match access_info.type:
-                case PaperAccessType.ARXIV:
+                case misc_models.PaperAccessType.ARXIV:
                     document = await asyncio.to_thread(ArxivParser().parse, access_info.source)
-                case PaperAccessType.PDF:
+                case misc_models.PaperAccessType.PDF:
                     document = await asyncio.to_thread(self._parse_pdf, access_info.source)
 
             end = time.perf_counter()

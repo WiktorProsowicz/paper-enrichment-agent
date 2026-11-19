@@ -5,14 +5,13 @@ The agent is a ReAct agent, which queries external bibliographic services throug
 The tools are exposed through an MCP server created by the agent and connected to in-memory, so no
 separate server process or endpoint is involved.
 
+The agent's answer is a :class:`~paper_enrichment_agent.common.models.misc.PaperAccessInfo`.
+
 Exported classes:
-    PaperAccessType: Enumerates the kinds of public sources of papers.
-    PaperAccessInfo: Describes how to access a paper and its bibliographic metadata.
     PaperAccessAgent: The LLM agent resolving citation signatures into paper access information.
 """
 
 import dataclasses
-import enum
 import operator
 import pathlib
 import re
@@ -43,36 +42,6 @@ from paper_enrichment_agent.common.models import misc as misc_models
 from paper_enrichment_agent.paper_scraping_service.components.paper_access_tools import (
     PaperAccessTools,
 )
-
-
-class PaperAccessType(enum.StrEnum):
-    """Enumerates the kinds of public sources of papers."""
-
-    # The paper has an HTML version on arXiv, the source is its arXiv ID
-    ARXIV = 'arxiv'
-
-    # The paper is available as an open access PDF, the source is the URL of the PDF
-    PDF = 'pdf'
-
-
-class PaperAccessInfo(pydantic.BaseModel):
-    """Describes how to access a publicly available version of a paper."""
-
-    type: Annotated[PaperAccessType, Field(description='The kind of the public source.')]
-    source: Annotated[
-        str,
-        Field(
-            description=(
-                'The arXiv ID of the paper (e.g. `1706.03762`) for the `arxiv` type, or the URL of '
-                'the PDF file for the `pdf` type.'
-            ),
-            min_length=1,
-        ),
-    ]
-    metadata: Annotated[
-        misc_models.PaperMetadata,
-        Field(description='The bibliographic metadata of the paper.'),
-    ]
 
 
 class _AgentState(TypedDict):
@@ -133,8 +102,8 @@ class PaperAccessAgent:
     # Matches a final answer wrapped in a Markdown code block
     _CODE_BLOCK_PATTERN = re.compile(r'^```(?:json)?\s*(.*?)\s*```$', re.DOTALL)
 
-    _ANSWER_ADAPTER: pydantic.TypeAdapter[PaperAccessInfo | None] = pydantic.TypeAdapter(
-        PaperAccessInfo | None
+    _ANSWER_ADAPTER: pydantic.TypeAdapter[misc_models.PaperAccessInfo | None] = (
+        pydantic.TypeAdapter(misc_models.PaperAccessInfo | None)
     )
 
     def __init__(self, llm: ChatLiteLLM, cfg: Configuration) -> None:
@@ -156,7 +125,7 @@ class PaperAccessAgent:
         )
 
     @mlflow.trace(name='PaperAccessAgent::invoke', span_type=SpanType.AGENT)
-    async def invoke(self, citation_signature: str) -> PaperAccessInfo | None:
+    async def invoke(self, citation_signature: str) -> misc_models.PaperAccessInfo | None:
         """Invokes the LLM agent to find a publicly available version of a cited paper.
 
         The tools of the agent are set up before the agent graph is run and torn down afterwards.
@@ -192,7 +161,7 @@ class PaperAccessAgent:
         graph = builder.compile()
 
         initial_messages = self._prompt_template.format_messages(
-            output_schema=PaperAccessInfo.model_json_schema(),
+            output_schema=misc_models.PaperAccessInfo.model_json_schema(),
             citation_signature=citation_signature,
         )
 
@@ -270,7 +239,7 @@ class PaperAccessAgent:
 
         return 'call_tool' if last_message.tool_calls else 'finish'
 
-    def _decode_final_answer(self, answer: str) -> PaperAccessInfo | None:
+    def _decode_final_answer(self, answer: str) -> misc_models.PaperAccessInfo | None:
         """Decodes the final answer of the agent into the paper access information."""
 
         answer = answer.strip()

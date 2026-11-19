@@ -142,6 +142,13 @@ def create_app(service: PaperScrapingService) -> fastapi.FastAPI:
         document, metadata = await service.parse_arxiv_paper(request.arxiv_id)
         return conn_models.ParsedPaperResponse(document=document, metadata=metadata)
 
+    @app.post('/resolve_paper_access')
+    async def resolve_paper_access(
+        request: conn_models.PaperAccessResolutionRequest,
+    ) -> conn_models.PaperAccessResolutionResponse:
+        access_info = await service.resolve_paper_access(request.citation_signature)
+        return conn_models.PaperAccessResolutionResponse(access_info=access_info)
+
     @app.post('/parse_paper_from_citation_signature')
     async def parse_paper_from_citation_signature(
         request: conn_models.CitationSignatureParsingRequest,

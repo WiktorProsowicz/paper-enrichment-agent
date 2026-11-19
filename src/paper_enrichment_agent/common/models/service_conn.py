@@ -14,6 +14,7 @@ from pydantic import Field
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models.misc import (
     DocumentMetadata,
+    PaperAccessInfo,
     PaperMetadata,
     SerializedDocFormat,
 )
@@ -161,5 +162,33 @@ class CitationSignatureParsingRequest(pydantic.BaseModel):
                 'paper, e.g. `A. Vaswani et al. Attention is all you need. NeurIPS, 2017.`.'
             ),
             min_length=1,
+        ),
+    ]
+
+
+class PaperAccessResolutionRequest(pydantic.BaseModel):
+    """Contains request data for finding the best public source of a paper by its citation."""
+
+    citation_signature: Annotated[
+        str,
+        Field(
+            description=(
+                'The citation signature of the paper, as found in the bibliography of the citing '
+                'paper, e.g. `A. Vaswani et al. Attention is all you need. NeurIPS, 2017.`.'
+            ),
+            min_length=1,
+        ),
+    ]
+
+
+class PaperAccessResolutionResponse(pydantic.BaseModel):
+    """Contains the resolved public source of a cited paper, along with its metadata."""
+
+    access_info: Annotated[
+        PaperAccessInfo | None,
+        Field(
+            description=(
+                'The access information of the paper, or None if no public version of it was found.'
+            )
         ),
     ]
