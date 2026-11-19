@@ -1,5 +1,4 @@
 import pathlib
-import re
 
 import mlflow
 from mlflow.entities import SpanType, Trace
@@ -21,12 +20,10 @@ from paper_enrichment_agent.common import document_manipulators
 from paper_enrichment_agent.footnote_enrichment_agent.components import doc_utils
 
 from llm_eval import core as harness_core
+from llm_eval.scorers import CALL_TOOL_SPAN_PATTERN
 
 
 AGENT_INVOCATION_SPAN_NAME = 'FootnoteEnrichmentAgent::invoke'
-CALL_TOOL_SPAN_PATTERN = re.compile(r'^call_tool\b')
-AGENT_REASONING_SPAN_NAME = 'agent_reasoning'
-AGENT_ACTION_SPAN_NAME = 'agent_action'
 
 
 class FigureUsefulnessResponseModel(pydantic.BaseModel):
@@ -325,11 +322,11 @@ def figures_extracted_before_revealing(trace: Trace) -> Feedback:
 
 @harness_core.scorer_with_typed_args()
 def agent_execution_stats_metrics(outputs: doc_models.Section, trace: Trace) -> list[Feedback]:
-    """Computes general metrics about the agent's execution."""
+    """Computes metrics about the referenced document and the generated footnote.
 
-    call_tool_spans = trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
-    reason_spans = trace.search_spans(name=AGENT_REASONING_SPAN_NAME)
-    action_spans = trace.search_spans(name=AGENT_ACTION_SPAN_NAME)
+    The agent-agnostic step counts are measured by
+    :func:`llm_eval.scorers.agent_step_count_metrics`.
+    """
 
     enrichment_request = conn_models.FootnoteEnrichmentRequest(
         **trace.search_spans(name=AGENT_INVOCATION_SPAN_NAME)[0].inputs['request']
@@ -340,9 +337,6 @@ def agent_execution_stats_metrics(outputs: doc_models.Section, trace: Trace) -> 
     )
 
     return [
-        Feedback(name='call_tool_count', value=len(call_tool_spans)),
-        Feedback(name='agent_reasoning_count', value=len(reason_spans)),
-        Feedback(name='agent_action_count', value=len(action_spans)),
         Feedback(
             name='n_figures_in_reference_doc',
             value=sum(1 for _ in reference_doc_getter.iter_components_of_type(doc_models.Figure)),
@@ -358,41 +352,6 @@ def agent_execution_stats_metrics(outputs: doc_models.Section, trace: Trace) -> 
             value=len(_stringify_generated_footnote(outputs)),
         ),
     ]
-
-
-def spawn_specific_tool_usage_metrics(tool_name: str) -> Scorer:
-    """Spawns a metric for tracking the usage of a specific tool."""
-
-    def specific_tool_usage_metrics(trace: Trace) -> list[Feedback]:
-        """Measures the call count and the success rate for a specific tool.
-
-        The success rate is not reported if the tool was not called, so that the run is not
-        scored on (and validated against) a behaviour that did not occur.
-        """
-        call_tool_spans = [
-            span
-            for span in trace.search_spans(name=CALL_TOOL_SPAN_PATTERN)
-            if span.attributes['tool_name'] == tool_name
-        ]
-
-        successful_tool_calls = [
-            span for span in call_tool_spans if not span.attributes['tool_is_error']
-        ]
-
-        call_count_feedback = Feedback(name=f'call_count:{tool_name}', value=len(call_tool_spans))
-
-        if not call_tool_spans:
-            return [call_count_feedback]
-
-        return [
-            call_count_feedback,
-            Feedback(
-                name=f'success_rate:{tool_name}',
-                value=len(successful_tool_calls) / len(call_tool_spans),
-            ),
-        ]
-
-    return scorer(specific_tool_usage_metrics)
 
 
 def _get_request_and_citation_fragment(

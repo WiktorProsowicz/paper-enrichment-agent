@@ -5,6 +5,7 @@ import pytest
 from llm_eval.suites.test_footnote_enrichment import data as harness_data
 from llm_eval.suites.test_footnote_enrichment import scorers as harness_scorers
 from llm_eval import core as harness_core
+from llm_eval import scorers as harness_common_scorers
 
 from paper_enrichment_agent.common.models import service_conn as conn_models
 from paper_enrichment_agent.common.models import document as doc_models
@@ -86,11 +87,12 @@ def test_footnote_enrichment_first_request(suite_run: harness_core.EvaluationRun
             harness_scorers.spawn_text_relevance_rating(judge_llm),
             harness_scorers.spawn_title_relevance_rating(judge_llm),
             harness_scorers.agent_execution_stats_metrics,
-            harness_scorers.spawn_specific_tool_usage_metrics('get_element_content'),
-            harness_scorers.spawn_specific_tool_usage_metrics('extract_paragraph_citation'),
-            harness_scorers.spawn_specific_tool_usage_metrics('extract_whole_paragraph'),
-            harness_scorers.spawn_specific_tool_usage_metrics('extract_figure'),
-            harness_scorers.spawn_specific_tool_usage_metrics('extract_equation'),
+            harness_common_scorers.agent_step_count_metrics,
+            harness_common_scorers.spawn_specific_tool_usage_metrics('get_element_content'),
+            harness_common_scorers.spawn_specific_tool_usage_metrics('extract_paragraph_citation'),
+            harness_common_scorers.spawn_specific_tool_usage_metrics('extract_whole_paragraph'),
+            harness_common_scorers.spawn_specific_tool_usage_metrics('extract_figure'),
+            harness_common_scorers.spawn_specific_tool_usage_metrics('extract_equation'),
             harness_scorers.paragraphs_extracted_before_revealing,
             harness_scorers.figures_extracted_before_revealing,
         ],
