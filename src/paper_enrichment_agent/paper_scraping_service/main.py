@@ -5,14 +5,11 @@ communication. The service downloads papers from external sources and parses the
 structured document format.
 """
 
-import contextlib
 import functools
 import pathlib
-from collections.abc import AsyncGenerator, Callable
 from typing import Annotated, Any
 
 import fastapi
-import httpx
 import hydra
 import mlflow
 import omegaconf
@@ -97,11 +94,7 @@ class AppCfg(pydantic.BaseModel):
     ]
 
 
-def create_app(
-    service: PaperScrapingService,
-    lifespan: Callable[[fastapi.FastAPI], contextlib.AbstractAsyncContextManager[None]]
-    | None = None,
-) -> fastapi.FastAPI:
+def create_app(service: PaperScrapingService) -> fastapi.FastAPI:
     """Creates a FastAPI application for the `paper_scraping_service` service.
 
     Each endpoint is named after the `PaperScrapingService` method it delegates to. Service errors
@@ -109,13 +102,12 @@ def create_app(
 
     Args:
         service: The service handling the requests.
-        lifespan: The lifespan of the app, managing the resources shared by the components.
 
     Returns:
         The configured FastAPI application.
     """
 
-    app = fastapi.FastAPI(title='Paper Scraping Service', lifespan=lifespan)
+    app = fastapi.FastAPI(title='Paper Scraping Service')
 
     app.mount('/metrics', prometheus_client.make_asgi_app())
 
@@ -176,9 +168,6 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
 
     mlflow_setup.setup_mlflow(app_cfg.mlflow_cfg)
 
-    # Shared by the PDF parsers, each of which parses a single paper
-    pdf_http_client = httpx.Client()
-
     paper_access_agent = PaperAccessAgent(
         llm=ChatLiteLLM(
             model=app_cfg.agent_llm_model,
@@ -196,15 +185,10 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
             timeout=app_cfg.arxiv_api_timeout,
         ),
         paper_access_agent=paper_access_agent,
-        pdf_parser_factory=lambda: PdfParser(app_cfg.pdf_parser, pdf_http_client),
+        pdf_parser_config=app_cfg.pdf_parser,
     )
 
-    @contextlib.asynccontextmanager
-    async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None, None]:
-        with pdf_http_client:
-            yield
-
-    app = create_app(service=service, lifespan=lifespan)
+    app = create_app(service=service)
 
     uvicorn.run(app, host='0.0.0.0', port=app_cfg.app_port)
 

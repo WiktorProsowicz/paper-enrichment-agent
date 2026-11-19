@@ -1,6 +1,7 @@
 import datetime
 from unittest.mock import AsyncMock, MagicMock, Mock
 
+import httpx
 import prometheus_client
 import pytest
 
@@ -24,13 +25,19 @@ from paper_enrichment_agent.paper_scraping_service.service import PaperScrapingS
 SAMPLE_ARXIV_ID = '1905.09263'
 SAMPLE_PDF_URL = 'https://example.org/paper.pdf'
 SAMPLE_CITATION = 'A. Author and B. Author. A sample paper. In Proceedings, 2019.'
+SAMPLE_PDF_PARSER_CONFIG = PdfParser.Configuration(
+    marker_api_url='http://marker.test',
+    marker_api_token='secret-token',
+    marker_api_timeout=10.0,
+    download_timeout=5.0,
+    max_pdf_size_bytes=1024,
+)
 
 
 def create_service(
     metrics: MagicMock,
     fetcher: MagicMock,
     paper_access_agent: MagicMock | None = None,
-    pdf_parser: MagicMock | None = None,
 ) -> PaperScrapingService:
     """Creates the service, mocking the dependencies not used by the test."""
 
@@ -38,7 +45,7 @@ def create_service(
         metrics=metrics,
         arxiv_metadata_fetcher=fetcher,
         paper_access_agent=paper_access_agent or MagicMock(spec=PaperAccessAgent),
-        pdf_parser_factory=Mock(return_value=pdf_parser or MagicMock(spec=PdfParser)),
+        pdf_parser_config=SAMPLE_PDF_PARSER_CONFIG,
     )
 
 
@@ -206,16 +213,29 @@ class TestParsePaperFromCitationSignature:
         )
 
     @pytest.fixture
-    def mock_pdf_parser(self, sample_document) -> MagicMock:
+    def mock_pdf_parser_cls(self, monkeypatch, sample_document) -> Mock:
 
-        return MagicMock(spec=PdfParser, parse=Mock(return_value=sample_document))
+        parser_cls = Mock(
+            return_value=MagicMock(spec=PdfParser, parse=Mock(return_value=sample_document)),
+            ParsingError=PdfParser.ParsingError,
+        )
+        monkeypatch.setattr(
+            'paper_enrichment_agent.paper_scraping_service.service.PdfParser', parser_cls
+        )
+
+        return parser_cls
+
+    @pytest.fixture
+    def mock_pdf_parser(self, mock_pdf_parser_cls) -> MagicMock:
+
+        return mock_pdf_parser_cls.return_value
 
     @pytest.fixture
     def service(
         self, mock_metrics, mock_fetcher, mock_access_agent, mock_pdf_parser
     ) -> PaperScrapingService:
 
-        return create_service(mock_metrics, mock_fetcher, mock_access_agent, mock_pdf_parser)
+        return create_service(mock_metrics, mock_fetcher, mock_access_agent)
 
     @pytest.fixture
     def pdf_access(self, mock_access_agent, sample_metadata) -> None:
@@ -260,6 +280,47 @@ class TestParsePaperFromCitationSignature:
         assert result == (sample_document, sample_metadata)
         mock_pdf_parser.parse.assert_called_once_with(SAMPLE_PDF_URL)
         patch_arxiv_parser.parse.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_creates_pdf_parser_with_fresh_http_client_per_paper(
+        self, service, pdf_access, mock_pdf_parser_cls, mock_pdf_parser
+    ):
+
+        clients_during_parsing: list[httpx.Client] = []
+
+        def record_client(_):
+            http_client = mock_pdf_parser_cls.call_args.args[1]
+            assert not http_client.is_closed
+            clients_during_parsing.append(http_client)
+            return mock_pdf_parser.parse.return_value
+
+        mock_pdf_parser.parse.side_effect = record_client
+
+        await service.parse_paper_from_citation_signature(SAMPLE_CITATION)
+        await service.parse_paper_from_citation_signature(SAMPLE_CITATION)
+
+        assert mock_pdf_parser_cls.call_count == 2
+        for call in mock_pdf_parser_cls.call_args_list:
+            config, http_client = call.args
+            assert config == SAMPLE_PDF_PARSER_CONFIG
+            assert isinstance(http_client, httpx.Client)
+
+        first_client, second_client = clients_during_parsing
+        assert first_client is not second_client
+        assert first_client.is_closed
+        assert second_client.is_closed
+
+    @pytest.mark.asyncio
+    async def test_closes_http_client_when_pdf_parsing_fails(
+        self, service, pdf_access, mock_pdf_parser_cls, mock_pdf_parser
+    ):
+
+        mock_pdf_parser.parse.side_effect = PdfParser.ParsingError('Conversion failed')
+
+        with pytest.raises(PaperScrapingService.PaperScrapingError):
+            await service.parse_paper_from_citation_signature(SAMPLE_CITATION)
+
+        assert mock_pdf_parser_cls.call_args.args[1].is_closed
 
     @pytest.mark.asyncio
     async def test_returns_none_when_no_public_version_is_found(

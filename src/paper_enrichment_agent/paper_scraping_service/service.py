@@ -7,9 +7,9 @@ with their bibliographic metadata. It is called by the other services of the app
 
 import asyncio
 import time
-from collections.abc import Callable
 from functools import cache
 
+import httpx
 from prometheus_client import Counter, Summary
 
 from paper_enrichment_agent.common import logging_setup
@@ -44,7 +44,7 @@ class PaperScrapingService:
         metrics: 'Metrics',
         arxiv_metadata_fetcher: ArxivMetadataFetcher,
         paper_access_agent: PaperAccessAgent,
-        pdf_parser_factory: Callable[[], PdfParser],
+        pdf_parser_config: PdfParser.Configuration,
     ) -> None:
         """Initializes the service.
 
@@ -52,13 +52,13 @@ class PaperScrapingService:
             metrics: The metrics of the service.
             arxiv_metadata_fetcher: The fetcher of the arXiv papers' metadata.
             paper_access_agent: The agent finding public versions of papers by their citations.
-            pdf_parser_factory: Creates a new PDF parser, since a parser handles a single paper.
+            pdf_parser_config: The configuration of the PDF parsers, created per parsed paper.
         """
 
         self._metrics = metrics
         self._arxiv_metadata_fetcher = arxiv_metadata_fetcher
         self._paper_access_agent = paper_access_agent
-        self._pdf_parser_factory = pdf_parser_factory
+        self._pdf_parser_config = pdf_parser_config
 
     async def parse_arxiv_paper(
         self, arxiv_id: str
@@ -113,7 +113,8 @@ class PaperScrapingService:
 
         The paper access agent identifies the paper and its bibliographic metadata, and picks its
         best public source: the HTML version on arXiv, or an open access PDF. The paper is then
-        parsed by the respective parser in a separate thread, as the parsers are synchronous.
+        parsed by the respective parser in a separate thread, as the parsers are synchronous. A PDF
+        paper is parsed by a new parser with its own HTTP client.
 
         Args:
             citation_signature: The citation signature of the paper, as found in the bibliography
@@ -168,9 +169,7 @@ class PaperScrapingService:
                 case PaperAccessType.ARXIV:
                     document = await asyncio.to_thread(ArxivParser().parse, access_info.source)
                 case PaperAccessType.PDF:
-                    document = await asyncio.to_thread(
-                        self._pdf_parser_factory().parse, access_info.source
-                    )
+                    document = await asyncio.to_thread(self._parse_pdf, access_info.source)
 
             end = time.perf_counter()
 
@@ -199,6 +198,12 @@ class PaperScrapingService:
         self._metrics.paper_parsing_time.labels(source=access_info.type.value).observe(end - start)
 
         return document, access_info.metadata
+
+    def _parse_pdf(self, pdf_url: str) -> doc_models.Document:
+        """Parses a PDF paper with a new parser and a new HTTP client (blocking)."""
+
+        with httpx.Client() as http_client:
+            return PdfParser(self._pdf_parser_config, http_client).parse(pdf_url)
 
 
 class Metrics:

@@ -59,7 +59,7 @@ class PdfParser:
     The parser is synchronous and blocking (network I/O and CPU-bound HTML parsing), so async
     callers should offload :meth:`parse` with `asyncio.to_thread`. The internal state of the
     parser is built during parsing, therefore a single instance of the parser should be used for
-    parsing a single paper. The injected HTTP client may be shared between parser instances.
+    parsing a single paper.
 
     The parser builds the skeleton of the document (title, abstract, bibliography, nesting of
     sections), while the contents of each section are decoded by a new :class:`_SectionDecoder`.
