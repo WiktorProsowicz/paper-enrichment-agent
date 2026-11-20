@@ -15,6 +15,20 @@ services:
     networks:
       - paper-enrichment-agent-network
 
+  paper-scraping-service:
+    image: app-base:runtime
+    container_name: llm-eval-paper-scraping-service
+    restart: unless-stopped
+    command: [uv, run, python, -m, paper_enrichment_agent.paper_scraping_service.main, 'agent_llm_model=${LLM_MODEL}', 'llm_api_key=${LLM_API_KEY}', 'paper_access_agent.tools.unpaywall_email=${UNPAYWALL_EMAIL}',
+      'paper_access_agent.tools.openalex_api_key=${OPENALEX_API_KEY:-}', pdf_parser.marker_api_url=NONE, pdf_parser.marker_api_token=NONE]
+    healthcheck:
+      test: [CMD-SHELL, curl -f http://localhost:8083/health || exit 1]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - paper-enrichment-agent-network
+
   eval-runner:
     image: app-base:eval
     restart: no
@@ -22,6 +36,8 @@ services:
     command: [uv, run, python, tests/llm_eval/run_eval.py, 'judge_llm_config.model_name=${JUDGE_LLM_MODEL}', 'judge_llm_config.api_key=${JUDGE_LLM_API_KEY}']
     depends_on:
       footnote-enrichment-agent:
+        condition: service_healthy
+      paper-scraping-service:
         condition: service_healthy
     networks:
       - paper-enrichment-agent-network

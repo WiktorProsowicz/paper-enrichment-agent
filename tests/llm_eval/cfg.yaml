@@ -1,7 +1,7 @@
 ---
 mlflow_tracking_uri: http://mlflow:5000
 test_case_exec_timeout: 1800
-active_suites: [test_footnote_enrichment]
+active_suites: [test_footnote_enrichment, test_paper_access]
 
 judge_llm_config:
   model_name: ''
@@ -23,3 +23,14 @@ suite_configs:
         text_relevance_rating/mean: 7.0
         title_relevance_rating/mean: 2.5
         success_rate:extract_paragraph_citation/mean: 0.8
+
+  llm-eval/test-paper-access:
+    paper_scraping_service_url: http://paper-scraping-service:8083
+
+    datasets:
+      paper_access: paper_access_ds/v1
+
+    thresholds:
+      paper_access:
+        access_type_correct/mean: 1.0
+        access_source_correct/mean: 1.0
