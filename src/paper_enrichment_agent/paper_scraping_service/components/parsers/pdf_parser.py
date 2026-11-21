@@ -76,7 +76,12 @@ class PdfParser:
         - Images are embedded in the subfigures as `data:` URIs.
         - Citations are kept as plain text, i.e. they are not resolved into references.
 
-    The parser raises `ParsingError` if the paper cannot be downloaded, converted or parsed.
+    The PDF is either downloaded from its URL (:meth:`parse`) or given directly as the file's
+    contents (:meth:`parse_pdf_content`). In both cases, its size and format are validated before
+    sending it to the marker API.
+
+    The parser raises `ParsingError` if the paper cannot be downloaded, validated, converted or
+    parsed.
     """
 
     class ParsingError(Exception):
@@ -139,11 +144,33 @@ class PdfParser:
             The parsed document.
 
         Raises:
-            ParsingError: If the PDF cannot be downloaded, converted or parsed.
+            ParsingError: If the PDF cannot be downloaded, converted or parsed, or the downloaded
+                file is not a valid PDF.
         """
 
         pdf_content = self._download_pdf(pdf_url)
         marker_output = self._convert_pdf(pdf_content, file_name=self._get_file_name(pdf_url))
+
+        return self.parse_marker_output(marker_output)
+
+    def parse_pdf_content(self, pdf_content: bytes, file_name: str) -> doc_models.Document:
+        """Validates a ready PDF file, converts it with the marker API and parses the result.
+
+        Args:
+            pdf_content: The contents of the PDF file.
+            file_name: The name of the PDF file, sent to the marker API.
+
+        Returns:
+            The parsed document.
+
+        Raises:
+            ParsingError: If the file is not a valid PDF, or it cannot be converted or parsed.
+        """
+
+        self._validate_pdf_content(pdf_content, source=f'file {file_name}')
+        marker_output = self._convert_pdf(
+            pdf_content, file_name=self._normalize_file_name(file_name)
+        )
 
         return self.parse_marker_output(marker_output)
 
@@ -244,17 +271,24 @@ class PdfParser:
             raise self.ParsingError(f'Failed to download the PDF from {pdf_url}: {e}') from e
 
         content = response.content
+        self._validate_pdf_content(content, source=f'the PDF from {pdf_url}')
+
+        return content
+
+    def _validate_pdf_content(self, content: bytes, source: str) -> None:
+        """Checks that the file is a non-empty PDF document within the size limit."""
+
+        if not content:
+            raise self.ParsingError(f'The contents of {source} are empty.')
 
         if len(content) > self._config.max_pdf_size_bytes:
             raise self.ParsingError(
-                f'The PDF from {pdf_url} has {len(content)} bytes, exceeding the limit of '
+                f'The contents of {source} have {len(content)} bytes, exceeding the limit of '
                 f'{self._config.max_pdf_size_bytes} bytes.'
             )
 
         if not content.startswith(self._PDF_MAGIC):
-            raise self.ParsingError(f'The file downloaded from {pdf_url} is not a PDF document.')
-
-        return content
+            raise self.ParsingError(f'The contents of {source} are not a PDF document.')
 
     def _convert_pdf(self, pdf_content: bytes, file_name: str) -> MarkerBlock:
         """Sends the PDF to the marker API and validates the returned JSON."""
@@ -400,7 +434,15 @@ class PdfParser:
     def _get_file_name(pdf_url: str) -> str:
         """Returns the name of the PDF file sent to the marker API."""
 
-        name = pathlib.PurePosixPath(urllib.parse.urlparse(pdf_url).path).name or 'paper'
+        return PdfParser._normalize_file_name(
+            pathlib.PurePosixPath(urllib.parse.urlparse(pdf_url).path).name
+        )
+
+    @staticmethod
+    def _normalize_file_name(name: str) -> str:
+        """Returns a non-empty file name of the PDF, ending with `.pdf`."""
+
+        name = pathlib.PurePosixPath(name).name or 'paper'
 
         return name if name.endswith('.pdf') else f'{name}.pdf'
 

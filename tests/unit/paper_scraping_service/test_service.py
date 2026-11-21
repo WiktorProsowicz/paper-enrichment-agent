@@ -13,6 +13,7 @@ from paper_enrichment_agent.common.models.misc import (
 )
 from paper_enrichment_agent.paper_scraping_service.components.fetchers import (
     ArxivMetadataFetcher,
+    CrossrefFetcher,
 )
 from paper_enrichment_agent.paper_scraping_service.components.paper_access_agent import (
     PaperAccessAgent,
@@ -26,6 +27,8 @@ from paper_enrichment_agent.paper_scraping_service.service import PaperScrapingS
 
 SAMPLE_ARXIV_ID = '1905.09263'
 SAMPLE_PDF_URL = 'https://example.org/paper.pdf'
+SAMPLE_DOI = '10.1145/3065386'
+SAMPLE_PDF_CONTENT = b'%PDF-1.5 fake content'
 SAMPLE_CITATION = 'A. Author and B. Author. A sample paper. In Proceedings, 2019.'
 SAMPLE_PDF_PARSER_CONFIG = PdfParser.Configuration(
     marker_api_url='http://marker.test',
@@ -40,12 +43,14 @@ def create_service(
     metrics: MagicMock,
     fetcher: MagicMock,
     paper_access_agent: MagicMock | None = None,
+    crossref_fetcher: MagicMock | None = None,
 ) -> PaperScrapingService:
     """Creates the service, mocking the dependencies not used by the test."""
 
     return PaperScrapingService(
         metrics=metrics,
         arxiv_metadata_fetcher=fetcher,
+        crossref_fetcher=crossref_fetcher or MagicMock(spec=CrossrefFetcher),
         paper_access_agent=paper_access_agent or MagicMock(spec=PaperAccessAgent),
         pdf_parser_config=SAMPLE_PDF_PARSER_CONFIG,
     )
@@ -199,6 +204,153 @@ class TestParseArxivPaper:
 
         with pytest.raises(RuntimeError, match='Unexpected failure'):
             await service.parse_arxiv_paper(SAMPLE_ARXIV_ID)
+
+
+class TestDownloadPdfPaper:
+    @pytest.fixture
+    def mock_crossref_fetcher(self, sample_metadata) -> MagicMock:
+
+        return MagicMock(spec=CrossrefFetcher, fetch=AsyncMock(return_value=sample_metadata))
+
+    @pytest.fixture
+    def mock_pdf_parser_cls(self, monkeypatch, sample_document) -> Mock:
+
+        parser_cls = Mock(
+            return_value=MagicMock(
+                spec=PdfParser, parse_pdf_content=Mock(return_value=sample_document)
+            ),
+            ParsingError=PdfParser.ParsingError,
+        )
+        monkeypatch.setattr(
+            'paper_enrichment_agent.paper_scraping_service.service.PdfParser', parser_cls
+        )
+
+        return parser_cls
+
+    @pytest.fixture
+    def mock_pdf_parser(self, mock_pdf_parser_cls) -> MagicMock:
+
+        return mock_pdf_parser_cls.return_value
+
+    @pytest.fixture
+    def service(
+        self, mock_metrics, mock_fetcher, mock_crossref_fetcher, mock_pdf_parser
+    ) -> PaperScrapingService:
+
+        return create_service(mock_metrics, mock_fetcher, crossref_fetcher=mock_crossref_fetcher)
+
+    @pytest.mark.asyncio
+    async def test_returns_parsed_document_and_crossref_metadata(
+        self,
+        service,
+        mock_pdf_parser_cls,
+        mock_pdf_parser,
+        mock_crossref_fetcher,
+        sample_document,
+        sample_metadata,
+    ):
+
+        document, metadata = await service.download_pdf_paper(
+            pdf_content=SAMPLE_PDF_CONTENT, file_name='paper.pdf', doi=SAMPLE_DOI
+        )
+
+        assert document == sample_document
+        assert metadata == sample_metadata
+        assert mock_pdf_parser_cls.call_args.args[0] == SAMPLE_PDF_PARSER_CONFIG
+        assert isinstance(mock_pdf_parser_cls.call_args.args[1], httpx.Client)
+        mock_pdf_parser.parse_pdf_content.assert_called_once_with(SAMPLE_PDF_CONTENT, 'paper.pdf')
+        mock_crossref_fetcher.fetch.assert_awaited_once_with(SAMPLE_DOI)
+
+    @pytest.mark.asyncio
+    async def test_reports_metrics_on_success(self, service, mock_metrics):
+
+        await service.download_pdf_paper(
+            pdf_content=SAMPLE_PDF_CONTENT, file_name='paper.pdf', doi=SAMPLE_DOI
+        )
+
+        mock_metrics.papers_parsed.labels.assert_called_once_with(
+            source='uploaded_pdf', status='success'
+        )
+        mock_metrics.papers_parsed.labels.return_value.inc.assert_called_once()
+        mock_metrics.paper_parsing_time.labels.assert_called_once_with(source='uploaded_pdf')
+        assert mock_metrics.paper_parsing_time.labels.return_value.observe.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_raises_when_pdf_is_invalid(self, service, mock_pdf_parser, mock_metrics):
+
+        mock_pdf_parser.parse_pdf_content.side_effect = PdfParser.ParsingError('not a PDF')
+
+        with pytest.raises(
+            PaperScrapingService.PaperScrapingError,
+            match=f'Failed to parse the PDF paper paper.pdf with DOI {SAMPLE_DOI}: not a PDF',
+        ):
+            await service.download_pdf_paper(
+                pdf_content=b'<html>', file_name='paper.pdf', doi=SAMPLE_DOI
+            )
+
+        mock_metrics.papers_parsed.labels.assert_called_once_with(
+            source='uploaded_pdf', status='failure'
+        )
+        assert mock_metrics.paper_parsing_time.labels.return_value.observe.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_raises_when_metadata_fetching_fails(
+        self, service, mock_crossref_fetcher, mock_metrics
+    ):
+
+        mock_crossref_fetcher.fetch.side_effect = CrossrefFetcher.FetchingError('Unknown DOI')
+
+        with pytest.raises(PaperScrapingService.PaperScrapingError, match='Unknown DOI'):
+            await service.download_pdf_paper(
+                pdf_content=SAMPLE_PDF_CONTENT, file_name='paper.pdf', doi=SAMPLE_DOI
+            )
+
+        mock_metrics.papers_parsed.labels.assert_called_once_with(
+            source='uploaded_pdf', status='failure'
+        )
+
+    @pytest.mark.asyncio
+    async def test_fetches_metadata_of_arxiv_doi_from_arxiv(
+        self, service, mock_fetcher, mock_crossref_fetcher, sample_metadata
+    ):
+
+        _, metadata = await service.download_pdf_paper(
+            pdf_content=SAMPLE_PDF_CONTENT,
+            file_name='paper.pdf',
+            doi=f'10.48550/arxiv.{SAMPLE_ARXIV_ID}',
+        )
+
+        assert metadata == sample_metadata
+        mock_fetcher.fetch.assert_called_once_with(SAMPLE_ARXIV_ID)
+        mock_crossref_fetcher.fetch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_raises_when_arxiv_metadata_fetching_fails(
+        self, service, mock_fetcher, mock_metrics
+    ):
+
+        mock_fetcher.fetch.side_effect = ArxivMetadataFetcher.FetchingError('arXiv down')
+
+        with pytest.raises(PaperScrapingService.PaperScrapingError, match='arXiv down'):
+            await service.download_pdf_paper(
+                pdf_content=SAMPLE_PDF_CONTENT,
+                file_name='paper.pdf',
+                doi=f'10.48550/arXiv.{SAMPLE_ARXIV_ID}',
+            )
+
+        mock_metrics.papers_parsed.labels.assert_called_once_with(
+            source='uploaded_pdf', status='failure'
+        )
+
+    @pytest.mark.asyncio
+    async def test_does_not_swallow_unexpected_errors(self, service, mock_pdf_parser):
+
+        mock_pdf_parser.parse_pdf_content.side_effect = RuntimeError('Unexpected failure')
+
+        with pytest.raises(RuntimeError, match='Unexpected failure'):
+            await service.download_pdf_paper(
+                pdf_content=SAMPLE_PDF_CONTENT, file_name='paper.pdf', doi=SAMPLE_DOI
+            )
 
 
 class TestResolvePaperAccess:
@@ -528,7 +680,7 @@ class TestMetrics:
             == 0
         )
 
-        for source in ('arxiv', 'pdf'):
+        for source in ('arxiv', 'pdf', 'uploaded_pdf'):
             assert (
                 registry.get_sample_value(
                     'paper_scraping_service_papers_parsed_total',

@@ -64,6 +64,12 @@ class ArxivMetadataFetcher:
 
     _ARXIV_ID_REGEX = re.compile(rf'^{_ARXIV_ID_PATTERN}$')
 
+    # The DOIs registered by arXiv, optionally given as URLs. The arXiv ID is captured. DOIs are
+    # case-insensitive, so `10.48550/arxiv.<id>` is accepted as well.
+    _ARXIV_DOI_REGEX = re.compile(
+        rf'^(?:https://doi\.org/)?10\.48550/arxiv\.({_ARXIV_ID_PATTERN})$', re.IGNORECASE
+    )
+
     # The only accepted form of the arXiv PDF URLs
     _ARXIV_PDF_URL_REGEX = re.compile(rf'^https://arxiv\.org/pdf/{_ARXIV_ID_PATTERN}$')
 
@@ -82,6 +88,41 @@ class ArxivMetadataFetcher:
         self._api_url = api_url
         self._ar5iv_html_url_base = ar5iv_html_url_base
         self._timeout = timeout
+
+    @classmethod
+    def is_arxiv_doi(cls, doi: str) -> bool:
+        """Checks whether a DOI is the one registered by arXiv for its paper.
+
+        The DOIs registered by arXiv (`10.48550/arXiv.<id>`) are managed by DataCite, so they are
+        unknown to Crossref. The metadata of such papers should be fetched from arXiv instead.
+
+        Args:
+            doi: The DOI, optionally prefixed with `https://doi.org/`.
+
+        Returns:
+            True if the DOI is an arXiv DOI.
+        """
+
+        return cls._ARXIV_DOI_REGEX.match(doi.strip()) is not None
+
+    @classmethod
+    def arxiv_id_from_doi(cls, doi: str) -> str:
+        """Extracts the arXiv ID from an arXiv DOI.
+
+        Args:
+            doi: The arXiv DOI, optionally prefixed with `https://doi.org/`.
+
+        Returns:
+            The arXiv ID, e.g. `2210.03629`.
+
+        Raises:
+            FetchingError: If the DOI is not an arXiv DOI (see :meth:`is_arxiv_doi`).
+        """
+
+        if (match := cls._ARXIV_DOI_REGEX.match(doi.strip())) is None:
+            raise cls.FetchingError(f'"{doi}" is not a DOI registered by arXiv.')
+
+        return match.group(1)
 
     def fetch(self, arxiv_id: str) -> misc_models.PaperMetadata:
         """Downloads the metadata of an arXiv paper.

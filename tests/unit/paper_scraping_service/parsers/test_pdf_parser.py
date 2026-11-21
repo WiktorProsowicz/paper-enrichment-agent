@@ -191,6 +191,55 @@ class TestParse:
             make_parser(transport).parse(PDF_URL)
 
 
+class TestParsePdfContent:
+    def test_sends_given_file_to_marker_without_downloading(self):
+        transport = FakeTransport(httpx.Response(200, json=load_marker_output(EXAMPLE_PAPER_2)))
+
+        document = make_parser(transport).parse_pdf_content(PDF_CONTENT, 'fastspeech.pdf')
+
+        assert document.title == 'FastSpeech: Fast, Robust and Controllable Text to Speech'
+
+        (marker_request,) = transport.requests
+        assert str(marker_request.url) == f'{MARKER_URL}/convert_pdf'
+        assert marker_request.headers['Authorization'] == f'Bearer {MARKER_TOKEN}'
+        assert b'filename="fastspeech.pdf"' in marker_request.content
+        assert PDF_CONTENT in marker_request.content
+
+    @pytest.mark.parametrize(
+        ('file_name', 'expected_name'),
+        [('paper', 'paper.pdf'), ('', 'paper.pdf'), ('../dir/paper.pdf', 'paper.pdf')],
+    )
+    def test_normalizes_file_name(self, file_name, expected_name):
+        transport = FakeTransport(httpx.Response(200, json=load_marker_output(EXAMPLE_PAPER_2)))
+
+        make_parser(transport).parse_pdf_content(PDF_CONTENT, file_name)
+
+        (marker_request,) = transport.requests
+        assert f'filename="{expected_name}"'.encode() in marker_request.content
+
+    @pytest.mark.parametrize(
+        ('content', 'config_overrides', 'error'),
+        [
+            (b'', {}, 'are empty'),
+            (b'<html>', {}, 'not a PDF'),
+            (PDF_CONTENT, {'max_pdf_size_bytes': 4}, 'exceeding the limit'),
+        ],
+    )
+    def test_rejects_invalid_file_without_calling_marker(self, content, config_overrides, error):
+        transport = FakeTransport(httpx.Response(200, json=load_marker_output(EXAMPLE_PAPER_2)))
+
+        with pytest.raises(PdfParser.ParsingError, match=error):
+            make_parser(transport, **config_overrides).parse_pdf_content(content, 'paper.pdf')
+
+        assert transport.requests == []
+
+    def test_raises_when_conversion_fails(self):
+        transport = FakeTransport(httpx.Response(500, json={'detail': 'PDF conversion failed.'}))
+
+        with pytest.raises(PdfParser.ParsingError, match='Failed to convert'):
+            make_parser(transport).parse_pdf_content(PDF_CONTENT, 'paper.pdf')
+
+
 class TestParseMarkerOutputOnExamplePapers:
     def test_extracts_title_and_abstract(self):
         document = parse_fixture(EXAMPLE_PAPER_1)

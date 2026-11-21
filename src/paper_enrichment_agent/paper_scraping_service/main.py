@@ -10,6 +10,7 @@ import pathlib
 from typing import Annotated, Any
 
 import fastapi
+import httpx
 import hydra
 import mlflow
 import omegaconf
@@ -23,6 +24,7 @@ from paper_enrichment_agent.common import logging_setup, mlflow_setup
 from paper_enrichment_agent.common.models import service_conn as conn_models
 from paper_enrichment_agent.paper_scraping_service.components.fetchers import (
     ArxivMetadataFetcher,
+    CrossrefFetcher,
 )
 from paper_enrichment_agent.paper_scraping_service.components.paper_access_agent import (
     PaperAccessAgent,
@@ -57,6 +59,24 @@ class AppCfg(pydantic.BaseModel):
     arxiv_api_timeout: Annotated[
         float,
         Field(description='The timeout (in seconds) of a single arXiv / ar5iv request.', gt=0),
+    ]
+    crossref_api_url: Annotated[
+        str,
+        Field(description='The URL of the Crossref REST API works endpoint.', min_length=1),
+    ]
+    crossref_email: Annotated[
+        str,
+        Field(
+            description=(
+                'The contact email sent to the Crossref API, so that the requests are served by '
+                'its "polite pool".'
+            ),
+            min_length=1,
+        ),
+    ]
+    crossref_api_timeout: Annotated[
+        float,
+        Field(description='The timeout (in seconds) of a single Crossref request.', gt=0),
     ]
     pdf_parser: Annotated[
         PdfParser.Configuration,
@@ -142,6 +162,16 @@ def create_app(service: PaperScrapingService) -> fastapi.FastAPI:
         document, metadata = await service.parse_arxiv_paper(request.arxiv_id)
         return conn_models.ParsedPaperResponse(document=document, metadata=metadata)
 
+    @app.post('/download_pdf_paper')
+    async def download_pdf_paper(
+        file: fastapi.UploadFile,
+        doi: Annotated[str, fastapi.Form(min_length=1)],
+    ) -> conn_models.ParsedPaperResponse:
+        document, metadata = await service.download_pdf_paper(
+            pdf_content=await file.read(), file_name=file.filename or '', doi=doi
+        )
+        return conn_models.ParsedPaperResponse(document=document, metadata=metadata)
+
     @app.post('/resolve_paper_access')
     async def resolve_paper_access(
         request: conn_models.PaperAccessResolutionRequest,
@@ -190,6 +220,12 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
             api_url=app_cfg.arxiv_api_url,
             ar5iv_html_url_base=app_cfg.ar5iv_html_url_base,
             timeout=app_cfg.arxiv_api_timeout,
+        ),
+        crossref_fetcher=CrossrefFetcher(
+            http_client=httpx.AsyncClient(),
+            api_url=app_cfg.crossref_api_url,
+            email=app_cfg.crossref_email,
+            timeout=app_cfg.crossref_api_timeout,
         ),
         paper_access_agent=paper_access_agent,
         pdf_parser_config=app_cfg.pdf_parser,

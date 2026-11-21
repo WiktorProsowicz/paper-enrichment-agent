@@ -178,6 +178,40 @@ class TestArxivMetadataFetcher:
             create_arxiv_fetcher().fetch(SAMPLE_ARXIV_ID)
 
 
+class TestArxivDoi:
+    @pytest.mark.parametrize(
+        ('doi', 'expected'),
+        [
+            ('10.48550/arXiv.2210.03629', True),
+            ('10.48550/arxiv.2210.03629', True),
+            ('https://doi.org/10.48550/arXiv.2210.03629v2', True),
+            (' 10.48550/arXiv.hep-th/9901001 ', True),
+            ('10.18653/v1/2023.acl-long.294', False),
+            ('10.48550/arXiv.not-an-id', False),
+            ('2210.03629', False),
+        ],
+    )
+    def test_recognizes_arxiv_dois(self, doi, expected):
+
+        assert ArxivMetadataFetcher.is_arxiv_doi(doi) is expected
+
+    @pytest.mark.parametrize(
+        ('doi', 'expected_id'),
+        [
+            ('10.48550/arxiv.2210.03629', '2210.03629'),
+            ('https://doi.org/10.48550/arXiv.2210.03629v2', '2210.03629v2'),
+        ],
+    )
+    def test_extracts_arxiv_id(self, doi, expected_id):
+
+        assert ArxivMetadataFetcher.arxiv_id_from_doi(doi) == expected_id
+
+    def test_raises_when_extracting_id_from_non_arxiv_doi(self):
+
+        with pytest.raises(ArxivMetadataFetcher.FetchingError, match='not a DOI registered'):
+            ArxivMetadataFetcher.arxiv_id_from_doi('10.18653/v1/2023.acl-long.294')
+
+
 class TestHasArxivHtmlVersion:
     @pytest.fixture
     def mock_ar5iv_get(self, monkeypatch) -> Mock:

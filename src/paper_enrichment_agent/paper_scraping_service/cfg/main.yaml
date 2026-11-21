@@ -7,6 +7,10 @@ arxiv_api_url: https://export.arxiv.org/api/query
 ar5iv_html_url_base: https://ar5iv.labs.arxiv.org/html
 arxiv_api_timeout: 30.0
 
+crossref_api_url: https://api.crossref.org/works
+crossref_email: ''
+crossref_api_timeout: 30.0
+
 pdf_parser:
   marker_api_url: ''
   marker_api_token: ''
