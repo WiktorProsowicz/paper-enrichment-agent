@@ -9,10 +9,12 @@ Exported classes:
     OpenAccessLocation: A single open access location of a paper reported by Unpaywall.
     UnpaywallResult: Summary of the open access status of a paper reported by Unpaywall.
     UnpaywallFetcher: Fetches the open access locations of papers from Unpaywall.
+    CrossrefFetcher: Fetches the metadata of papers by their DOIs from Crossref.
 """
 
 import datetime
 import re
+import urllib.parse
 import xml.etree.ElementTree as ET
 from typing import Annotated, Any
 
@@ -505,6 +507,116 @@ class UnpaywallFetcher:
                 if location.get('url_for_pdf')
             ],
         )
+
+
+class CrossrefFetcher:
+    """Fetches the bibliographic metadata of papers by their DOIs from Crossref.
+
+    The metadata is read from the Crossref REST API (https://api.crossref.org). The contact email
+    is sent with every request, so that the requests are served by the Crossref "polite pool". The
+    publication date is the earliest one declared for the paper (print or online publication),
+    falling back to the date of its DOI registration. Partial dates (year only, year and month)
+    are completed with the first month / day.
+
+    The fetcher is async and stateless, the injected HTTP client may be shared. It raises
+    `FetchingError` if the metadata cannot be fetched or does not describe the paper.
+    """
+
+    class FetchingError(Exception):
+        """Raised when the metadata of a paper cannot be fetched from Crossref."""
+
+    # Date fields of a Crossref work, in the order of preference
+    _DATE_FIELDS = ('published', 'issued', 'created')
+
+    def __init__(
+        self, http_client: httpx.AsyncClient, api_url: str, email: str, timeout: float
+    ) -> None:
+        """Initializes the fetcher.
+
+        Args:
+            http_client: The HTTP client sending the requests.
+            api_url: The URL of the Crossref works endpoint.
+            email: The contact email sent to Crossref.
+            timeout: The timeout (in seconds) of a single request.
+        """
+
+        self._http_client = http_client
+        self._api_url = api_url
+        self._email = email
+        self._timeout = timeout
+
+    async def fetch(self, doi: str) -> misc_models.PaperMetadata:
+        """Fetches the metadata of a paper.
+
+        Args:
+            doi: The DOI of the paper, optionally prefixed with `https://doi.org/`.
+
+        Returns:
+            The metadata of the paper.
+
+        Raises:
+            FetchingError: If the DOI is invalid or unknown to Crossref, the request fails, or the
+                response lacks the publication date of the paper.
+        """
+
+        doi = doi.strip().removeprefix(_DOI_URL_PREFIX)
+
+        if not doi.startswith('10.'):
+            raise self.FetchingError(f'"{doi}" is not a valid DOI. A DOI starts with `10.`.')
+
+        response_json = await _get_json(
+            self._http_client,
+            f'{self._api_url}/{urllib.parse.quote(doi, safe="/")}',
+            params={'mailto': self._email},
+            timeout=self._timeout,
+            service_name='Crossref',
+            error_cls=self.FetchingError,
+        )
+
+        work = response_json.get('message')
+
+        if not isinstance(work, dict):
+            raise self.FetchingError(f'Crossref returned no metadata of the paper with DOI {doi}.')
+
+        return misc_models.PaperMetadata(
+            doi=work.get('DOI') or doi,
+            authors=self._read_authors(work),
+            publication_date=self._read_publication_date(work, doi),
+        )
+
+    def _read_authors(self, work: dict[str, Any]) -> list[str]:
+        """Returns the full names of the work's authors, skipping the unnamed ones."""
+
+        authors: list[str] = []
+
+        for author in work.get('author') or []:
+            name = ' '.join(
+                part for part in (author.get('given'), author.get('family')) if part
+            ) or author.get('name')
+
+            if name:
+                authors.append(name)
+
+        return authors
+
+    def _read_publication_date(self, work: dict[str, Any], doi: str) -> datetime.date:
+        """Returns the first valid date of the work, completing partial dates."""
+
+        for field in self._DATE_FIELDS:
+            date_parts = ((work.get(field) or {}).get('date-parts') or [[]])[0] or []
+
+            if not date_parts or date_parts[0] is None:
+                continue
+
+            year, month, day = [*date_parts, 1, 1][:3]
+
+            try:
+                return datetime.date(int(year), int(month), int(day))
+
+            except (TypeError, ValueError):
+                continue
+
+        raise self.FetchingError(f'Crossref declares no publication date of the paper {doi}.')
 
 
 # Prefix of the DOIs given as URLs

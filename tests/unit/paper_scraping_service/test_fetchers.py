@@ -9,6 +9,7 @@ import requests
 from paper_enrichment_agent.common.models.misc import PaperMetadata
 from paper_enrichment_agent.paper_scraping_service.components.fetchers import (
     ArxivMetadataFetcher,
+    CrossrefFetcher,
     OpenAlexScraper,
     UnpaywallFetcher,
 )
@@ -19,6 +20,7 @@ API_URL = 'https://export.arxiv.org/api/query'
 AR5IV_URL = 'https://ar5iv.test/html'
 OPENALEX_URL = 'https://openalex.test/works'
 UNPAYWALL_URL = 'https://unpaywall.test/v2'
+CROSSREF_URL = 'https://crossref.test/works'
 TIMEOUT = 12.5
 
 SAMPLE_ARXIV_ID = '1706.03762'
@@ -555,4 +557,135 @@ class TestUnpaywallFetcher:
             raise AssertionError('No request expected.')
 
         with pytest.raises(UnpaywallFetcher.FetchingError, match='is not a valid DOI'):
+            await self.create_fetcher(handler).fetch('arXiv:1706.03762')
+
+
+class TestCrossrefFetcher:
+    def create_fetcher(self, handler: Handler) -> CrossrefFetcher:
+
+        return CrossrefFetcher(
+            http_client=make_async_client(handler),
+            api_url=CROSSREF_URL,
+            email='tools@example.org',
+            timeout=TIMEOUT,
+        )
+
+    def respond_with_work(self, work: dict) -> Handler:
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={'status': 'ok', 'message': work})
+
+        return handler
+
+    @pytest.mark.asyncio
+    async def test_returns_paper_metadata(self):
+
+        requests_sent: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests_sent.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    'status': 'ok',
+                    'message': {
+                        'DOI': '10.1145/3065386',
+                        'author': [
+                            {'given': 'Alex', 'family': 'Krizhevsky'},
+                            {'family': 'Sutskever'},
+                            {'name': 'ImageNet Consortium'},
+                            {'affiliation': []},
+                        ],
+                        'published': {'date-parts': [[2017, 5, 24]]},
+                        'created': {'date-parts': [[2017, 1, 1]]},
+                    },
+                },
+            )
+
+        metadata = await self.create_fetcher(handler).fetch('https://doi.org/10.1145/3065386')
+
+        assert metadata == PaperMetadata(
+            doi='10.1145/3065386',
+            authors=['Alex Krizhevsky', 'Sutskever', 'ImageNet Consortium'],
+            publication_date=datetime.date(2017, 5, 24),
+        )
+        assert requests_sent[0].url.path == '/works/10.1145/3065386'
+        assert requests_sent[0].url.params['mailto'] == 'tools@example.org'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ('work_dates', 'expected_date'),
+        [
+            ({'published': {'date-parts': [[2020]]}}, datetime.date(2020, 1, 1)),
+            ({'published': {'date-parts': [[2020, 7]]}}, datetime.date(2020, 7, 1)),
+            (
+                {'published': {'date-parts': [[None]]}, 'issued': {'date-parts': [[2019, 3, 2]]}},
+                datetime.date(2019, 3, 2),
+            ),
+            (
+                {'issued': {'date-parts': [[2019, 13, 1]]}, 'created': {'date-parts': [[2018]]}},
+                datetime.date(2018, 1, 1),
+            ),
+        ],
+    )
+    async def test_reads_first_valid_publication_date(self, work_dates, expected_date):
+
+        metadata = await self.create_fetcher(
+            self.respond_with_work({'DOI': '10.1/abc', **work_dates})
+        ).fetch('10.1/abc')
+
+        assert metadata.publication_date == expected_date
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_requested_doi(self):
+
+        metadata = await self.create_fetcher(
+            self.respond_with_work({'published': {'date-parts': [[2020]]}})
+        ).fetch('10.1/abc')
+
+        assert metadata.doi == '10.1/abc'
+        assert metadata.authors == []
+
+    @pytest.mark.asyncio
+    async def test_raises_when_publication_date_is_missing(self):
+
+        with pytest.raises(CrossrefFetcher.FetchingError, match='no publication date'):
+            await self.create_fetcher(
+                self.respond_with_work({'DOI': '10.1/abc', 'issued': {'date-parts': [[None]]}})
+            ).fetch('10.1/abc')
+
+    @pytest.mark.asyncio
+    async def test_raises_when_message_is_missing(self):
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={'status': 'ok'})
+
+        with pytest.raises(CrossrefFetcher.FetchingError, match='no metadata'):
+            await self.create_fetcher(handler).fetch('10.1/abc')
+
+    @pytest.mark.asyncio
+    async def test_raises_on_unknown_doi(self):
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(404)
+
+        with pytest.raises(CrossrefFetcher.FetchingError, match='Crossref has no record'):
+            await self.create_fetcher(handler).fetch('10.1/unknown')
+
+    @pytest.mark.asyncio
+    async def test_raises_on_invalid_json(self):
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=b'not json')
+
+        with pytest.raises(CrossrefFetcher.FetchingError, match='invalid JSON'):
+            await self.create_fetcher(handler).fetch('10.1/abc')
+
+    @pytest.mark.asyncio
+    async def test_raises_on_invalid_doi(self):
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise AssertionError('No request expected.')
+
+        with pytest.raises(CrossrefFetcher.FetchingError, match='is not a valid DOI'):
             await self.create_fetcher(handler).fetch('arXiv:1706.03762')
