@@ -15,7 +15,7 @@ import httpx
 import mcp
 import mlflow
 import pydantic
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.prompts import (
     ChatPromptTemplate,
     HumanMessagePromptTemplate,
@@ -29,6 +29,7 @@ from langgraph.runtime import Runtime as LangGraphRuntime
 from mcp.client.streamable_http import streamable_http_client as mcp_client
 from mlflow.entities import SpanType
 
+from paper_enrichment_agent.common import mcp_agent_utils
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models.service_conn import FootnoteEnrichmentRequest
 from paper_enrichment_agent.footnote_enrichment_agent.components import doc_utils
@@ -248,18 +249,7 @@ class FootnoteEnrichmentAgent:
             mcp_tools = (await mcp_session.list_tools()).tools
 
         llm_with_tools = self._llm.bind_tools(
-            [
-                {
-                    'type': 'function',
-                    'function': {
-                        'name': tool.name,
-                        'description': tool.description,
-                        'parameters': tool.inputSchema,
-                    },
-                }
-                for tool in mcp_tools
-            ],
-            tool_choice='auto',
+            mcp_agent_utils.mcp_tools_to_llm_functions(mcp_tools), tool_choice='auto'
         )
 
         model_response = await llm_with_tools.ainvoke(state['messages'])
@@ -287,43 +277,8 @@ class FootnoteEnrichmentAgent:
                 f'Expected last message to be of type AIMessage, but got {type(last_message)}'
             )
 
-        tool_responses: list[ToolMessage] = []
-
         async with self._setup_mcp_session(runtime.context.enrichment_session_id) as mcp_session:
-            for tool_call in last_message.tool_calls:
-                with mlflow.start_span(
-                    f'call_tool {tool_call["name"]}', span_type=SpanType.TOOL
-                ) as tool_call_span:
-                    tool_call_span.set_inputs(tool_call['args'])
-
-                    tool_response = await mcp_session.call_tool(
-                        name=tool_call['name'],
-                        arguments=tool_call['args'],
-                    )
-
-                    tool_call_span.set_attributes(
-                        {
-                            'tool_name': tool_call['name'],
-                            'tool_is_error': tool_response.isError,
-                        }
-                    )
-                    tool_call_span.set_outputs(tool_response.structuredContent)
-
-                    if tool_response.isError:
-                        tool_call_span.record_exception(str(tool_response.content))
-
-                tool_responses.append(
-                    ToolMessage(
-                        content='\n'.join(
-                            block.text
-                            if isinstance(block, mcp.types.TextContent)
-                            else block.model_dump_json()
-                            for block in tool_response.content
-                        ),
-                        tool_call_id=tool_call['id'],
-                        status='error' if tool_response.isError else 'success',
-                    )
-                )
+            tool_responses = await mcp_agent_utils.execute_tool_calls(mcp_session, last_message)
 
         return {'messages': tool_responses}  # type: ignore[typeddict-item]
 

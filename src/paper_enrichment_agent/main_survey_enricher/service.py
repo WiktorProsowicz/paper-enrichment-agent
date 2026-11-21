@@ -11,6 +11,7 @@ import tempfile
 import time
 from functools import cache
 
+import pydantic
 from mlflow.entities import SpanType
 from prometheus_client import Counter, Gauge, Summary
 
@@ -23,8 +24,12 @@ from paper_enrichment_agent.common.models.misc import (
     SerializedDocFormat,
     SurveyMetadata,
 )
-from paper_enrichment_agent.common.models.service_conn import FootnoteEnrichmentRequest
-from paper_enrichment_agent.main_survey_enricher.components.arxiv_parser import ArxivParser
+from paper_enrichment_agent.common.models.service_conn import (
+    ArxivPaperParsingRequest,
+    CitationSignatureParsingRequest,
+    FootnoteEnrichmentRequest,
+    ParsedPaperResponse,
+)
 from paper_enrichment_agent.main_survey_enricher.components.db_clients import (
     rendered_doc_db_client,
 )
@@ -53,24 +58,28 @@ class MainSurveyEnricherService:
     # Formats `render_document` has a serializer for.
     _SUPPORTED_RENDERING_FORMATS = (SerializedDocFormat.MARKDOWN,)
 
+    class _OptionalParsedPaper(pydantic.RootModel[ParsedPaperResponse | None]):
+        """Response of `/parse_paper_from_citation_signature`, null if no paper was found."""
+
     def __init__(
         self,
         metrics: 'Metrics',
         doc_db_client: DocDBClient,
         rendered_doc_db_client: rendered_doc_db_client.RenderedDocDBClient,
         footnote_agent_client: HTTPClient,
+        paper_scraping_client: HTTPClient,
     ) -> None:
 
         self._metrics = metrics
         self._doc_db_client = doc_db_client
         self._rendered_doc_db_client = rendered_doc_db_client
         self._footnote_agent_client = footnote_agent_client
+        self._paper_scraping_client = paper_scraping_client
 
     async def register_arxiv_survey(self, arxiv_id: str, name: str, description: str) -> None:
         """Registers a survey for the given arXiv ID.
 
-        The paper is fetched and parsed in a separate thread, since the parser is synchronous and
-        its HTML parsing is CPU-bound.
+        The paper is downloaded and parsed by the `paper_scraping_service` service.
 
         Args:
             arxiv_id: The arXiv ID of the paper to register a survey for.
@@ -80,7 +89,12 @@ class MainSurveyEnricherService:
 
         try:
             start = time.perf_counter()
-            document = await asyncio.to_thread(ArxivParser().parse, arxiv_id)
+            parsed_paper = await self._paper_scraping_client.apost(
+                '/parse_arxiv_paper',
+                ArxivPaperParsingRequest(arxiv_id=arxiv_id),
+                response_schema=ParsedPaperResponse,
+            )
+            document = parsed_paper.document
             end = time.perf_counter()
 
             _logger().info(
@@ -88,13 +102,17 @@ class MainSurveyEnricherService:
                 arxiv_id=arxiv_id,
                 name=name,
                 description=description,
+                paper_metadata=parsed_paper.metadata,
             )
             self._metrics.papers_parsed.labels(source='arxiv', status='success').inc()
             self._metrics.paper_parsing_time.observe(end - start)
 
             start = time.perf_counter()
             doc_metadata = await self._doc_db_client.add_document(
-                document=document, name=name, description=description
+                document=document,
+                name=name,
+                description=description,
+                paper_metadata=parsed_paper.metadata,
             )
             await self._doc_db_client.register_as_survey(paper_id=doc_metadata.paper_id)
             end = time.perf_counter()
@@ -108,7 +126,7 @@ class MainSurveyEnricherService:
             self._metrics.papers_added.labels(source='arxiv').inc()
             self._metrics.doc_db_operations_time.observe(end - start)
 
-        except ArxivParser.ParsingError as e:
+        except HTTPClient.HTTPClientError as e:
             _logger().error(
                 'Failed to parse the arXiv paper.',
                 arxiv_id=arxiv_id,
@@ -133,6 +151,189 @@ class MainSurveyEnricherService:
 
             raise self.MainSurveyEnricherError(
                 f'Failed to register the survey for the arXiv paper with ID {arxiv_id}: {e}'
+            ) from e
+
+    async def parse_referenced_paper_pdf(
+        self, survey_id: str, reference_id: str, pdf_content: bytes, file_name: str, doi: str
+    ) -> DocumentMetadata:
+        """Adds a paper cited by a survey from its PDF file, supplied manually by the user.
+
+        This is the manual alternative to finding the cited paper with the paper access agent,
+        e.g. for papers without a public version. The PDF file and the DOI are delegated to the
+        `paper_scraping_service` service, which validates and parses the file and fetches the
+        paper's metadata by its DOI. The parsed paper is stored as a new document, named after its
+        title and described by the survey's bibliography entry, and is assigned to that entry (see
+        `SurveyMetadata.referenced_docs`).
+
+        Args:
+            survey_id: The ID of the survey citing the paper.
+            reference_id: The ID of the survey's bibliography entry of the paper (the first
+                element of an entry of `Document.referenced_papers`).
+            pdf_content: The contents of the PDF file of the paper.
+            file_name: The name of the PDF file.
+            doi: The DOI of the paper.
+
+        Returns:
+            The metadata of the stored document.
+        """
+
+        try:
+            bibliography_entry = await self._get_unassigned_bibliography_entry(
+                survey_id, reference_id
+            )
+
+            start = time.perf_counter()
+            parsed_paper = await self._paper_scraping_client.apost_multipart(
+                '/download_pdf_paper',
+                data={'doi': doi},
+                files={'file': (file_name, pdf_content, 'application/pdf')},
+                response_schema=ParsedPaperResponse,
+            )
+            end = time.perf_counter()
+
+            _logger().info(
+                'Successfully parsed the PDF of the referenced paper.',
+                survey_id=survey_id,
+                reference_id=reference_id,
+                file_name=file_name,
+                paper_metadata=parsed_paper.metadata,
+            )
+            self._metrics.papers_parsed.labels(source='pdf', status='success').inc()
+            self._metrics.paper_parsing_time.observe(end - start)
+
+            return await self._store_referenced_paper(
+                survey_id=survey_id,
+                reference_id=reference_id,
+                parsed_paper=parsed_paper,
+                description=bibliography_entry,
+                source='pdf',
+            )
+
+        except HTTPClient.HTTPClientError as e:
+            _logger().error(
+                'Failed to parse the PDF of the referenced paper.',
+                survey_id=survey_id,
+                reference_id=reference_id,
+                file_name=file_name,
+                doi=doi,
+                error=str(e),
+            )
+            self._metrics.papers_parsed.labels(source='pdf', status='failure').inc()
+
+            raise self.MainSurveyEnricherError(
+                f'Failed to parse the PDF {file_name} of the reference {reference_id} of survey '
+                f'{survey_id}: {e}'
+            ) from e
+
+        except (DocDBClient.DocDBClientError, ValueError) as e:
+            _logger().error(
+                'Failed to add the referenced paper to the survey.',
+                survey_id=survey_id,
+                reference_id=reference_id,
+                file_name=file_name,
+                doi=doi,
+                error=str(e),
+            )
+
+            raise self.MainSurveyEnricherError(
+                f'Failed to add the referenced paper {reference_id} to survey {survey_id}: {e}'
+            ) from e
+
+    async def download_referenced_paper(
+        self, survey_id: str, citation_path: str
+    ) -> DocumentMetadata | None:
+        """Finds, downloads and adds a paper cited by a survey.
+
+        The bibliography entry targeted by the citation is sent as the citation signature to the
+        `paper_scraping_service` service, whose paper access agent looks for a public version of
+        the paper (arXiv HTML, arXiv PDF or an open access PDF) and parses it. The parsed paper is
+        stored as a new document, named after its title and described by the bibliography entry,
+        and is assigned to that entry (see `SurveyMetadata.referenced_docs`).
+
+        If no public version of the paper is found, nothing is stored and `None` is returned. The
+        paper's PDF can then be supplied manually, see `parse_referenced_paper_pdf`.
+
+        Args:
+            survey_id: The ID of the survey citing the paper.
+            citation_path: The path of a citation reference to the paper in the survey.
+
+        Returns:
+            The metadata of the stored document, or `None` if the paper could not be found.
+        """
+
+        try:
+            start = time.perf_counter()
+            async with self._doc_db_client.get_document_struct_ref(survey_id) as survey:
+                _, citation = self._resolve_citation(survey, citation_path)
+                reference_id = citation.target
+            end = time.perf_counter()
+            self._metrics.doc_db_operations_time.observe(end - start)
+
+            citation_signature = await self._get_unassigned_bibliography_entry(
+                survey_id, reference_id
+            )
+
+            start = time.perf_counter()
+            response = await self._paper_scraping_client.apost(
+                '/parse_paper_from_citation_signature',
+                CitationSignatureParsingRequest(citation_signature=citation_signature),
+                response_schema=self._OptionalParsedPaper,
+            )
+            end = time.perf_counter()
+
+            if (parsed_paper := response.root) is None:
+                _logger().warning(
+                    'No public version of the referenced paper was found.',
+                    survey_id=survey_id,
+                    citation_path=citation_path,
+                    reference_id=reference_id,
+                    citation_signature=citation_signature,
+                )
+                self._metrics.papers_parsed.labels(source='citation', status='failure').inc()
+
+                return None
+
+            _logger().info(
+                'Successfully downloaded and parsed the referenced paper.',
+                survey_id=survey_id,
+                citation_path=citation_path,
+                reference_id=reference_id,
+                paper_metadata=parsed_paper.metadata,
+            )
+            self._metrics.papers_parsed.labels(source='citation', status='success').inc()
+            self._metrics.paper_parsing_time.observe(end - start)
+
+            return await self._store_referenced_paper(
+                survey_id=survey_id,
+                reference_id=reference_id,
+                parsed_paper=parsed_paper,
+                description=citation_signature,
+                source='citation',
+            )
+
+        except HTTPClient.HTTPClientError as e:
+            _logger().error(
+                'Failed to download the referenced paper.',
+                survey_id=survey_id,
+                citation_path=citation_path,
+                error=str(e),
+            )
+            self._metrics.papers_parsed.labels(source='citation', status='failure').inc()
+
+            raise self.MainSurveyEnricherError(
+                f'Failed to download the paper cited at {citation_path} of survey {survey_id}: {e}'
+            ) from e
+
+        except (DocDBClient.DocDBClientError, ValueError) as e:
+            _logger().error(
+                'Failed to add the referenced paper to the survey.',
+                survey_id=survey_id,
+                citation_path=citation_path,
+                error=str(e),
+            )
+
+            raise self.MainSurveyEnricherError(
+                f'Failed to add the paper cited at {citation_path} to survey {survey_id}: {e}'
             ) from e
 
     async def remove_survey(self, survey_id: str) -> None:
@@ -557,6 +758,68 @@ class MainSurveyEnricherService:
                 f'Failed to enrich the citation {citation_path} of survey {survey_id}: {e}'
             ) from e
 
+    async def _get_unassigned_bibliography_entry(self, survey_id: str, reference_id: str) -> str:
+        """Returns the survey's bibliography entry that has no document assigned yet.
+
+        Raises:
+            ValueError: If the survey has no such entry or a document is already assigned to it.
+        """
+
+        start = time.perf_counter()
+        survey_info = await self._doc_db_client.get_survey_info(survey_id)
+        async with self._doc_db_client.get_document_struct_ref(survey_id) as survey:
+            bibliography = dict(survey.referenced_papers)
+        end = time.perf_counter()
+        self._metrics.doc_db_operations_time.observe(end - start)
+
+        if reference_id not in bibliography:
+            raise ValueError(
+                f'The survey {survey_id} has no bibliography entry with ID {reference_id}.'
+            )
+
+        if (assigned_paper_id := survey_info.referenced_docs.get(reference_id)) is not None:
+            raise ValueError(
+                f'The document {assigned_paper_id} is already assigned to the reference '
+                f'{reference_id} of survey {survey_id}.'
+            )
+
+        return bibliography[reference_id]
+
+    async def _store_referenced_paper(
+        self,
+        survey_id: str,
+        reference_id: str,
+        parsed_paper: ParsedPaperResponse,
+        description: str,
+        source: str,
+    ) -> DocumentMetadata:
+        """Stores a parsed paper and assigns it to the survey's bibliography entry."""
+
+        start = time.perf_counter()
+        doc_metadata = await self._doc_db_client.add_document(
+            document=parsed_paper.document,
+            name=parsed_paper.document.title,
+            description=description,
+            paper_metadata=parsed_paper.metadata,
+        )
+        await self._doc_db_client.add_referenced_document(
+            survey_id=survey_id,
+            reference_id=reference_id,
+            referenced_paper_id=doc_metadata.paper_id,
+        )
+        end = time.perf_counter()
+
+        _logger().info(
+            'Successfully assigned the referenced paper to the survey.',
+            survey_id=survey_id,
+            reference_id=reference_id,
+            paper_id=doc_metadata.paper_id,
+        )
+        self._metrics.papers_added.labels(source=source).inc()
+        self._metrics.doc_db_operations_time.observe(end - start)
+
+        return doc_metadata
+
     def _resolve_citation(
         self, document: doc_models.Document, citation_path: str
     ) -> tuple[doc_models.Paragraph, doc_models.Reference]:
@@ -692,12 +955,15 @@ class Metrics:
             namespace='main_survey_enricher',
         )
 
-        self.papers_added.labels(source='arxiv')
+        for source in ('arxiv', 'pdf', 'citation'):
+            self.papers_added.labels(source=source)
+
+            for status in ('success', 'failure'):
+                self.papers_parsed.labels(source=source, status=status)
 
         for doc_format in SerializedDocFormat:
             for status in ('success', 'failure'):
                 self.documents_rendered.labels(format=doc_format, status=status)
 
         for status in ('success', 'failure'):
-            self.papers_parsed.labels(source='arxiv', status=status)
             self.footnotes_enriched.labels(status=status)

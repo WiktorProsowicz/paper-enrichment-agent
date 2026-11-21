@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -2838,6 +2838,7 @@ dependencies = [
     { name = "mlflow" },
     { name = "prometheus-client" },
     { name = "pydantic" },
+    { name = "python-multipart" },
     { name = "requests" },
     { name = "structlog" },
     { name = "uvicorn" },
@@ -2874,6 +2875,7 @@ requires-dist = [
     { name = "mlflow", specifier = ">=3.16.0" },
     { name = "prometheus-client", specifier = ">=0.26.0" },
     { name = "pydantic", specifier = ">=2.13.4" },
+    { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "structlog", specifier = ">=26.1.0" },
     { name = "uvicorn", specifier = ">=0.52.3" },

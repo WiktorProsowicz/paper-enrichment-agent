@@ -1,0 +1,41 @@
+---
+json_logs_path: /tmp/output_logs.jsonl
+
+app_port: 8083
+
+arxiv_api_url: https://export.arxiv.org/api/query
+ar5iv_html_url_base: https://ar5iv.labs.arxiv.org/html
+arxiv_api_timeout: 30.0
+
+crossref_api_url: https://api.crossref.org/works
+crossref_email: ''
+crossref_api_timeout: 30.0
+
+pdf_parser:
+  marker_api_url: ''
+  marker_api_token: ''
+  marker_api_timeout: 1800.0
+  download_timeout: 60.0
+  max_pdf_size_bytes: 104857600
+
+mlflow_cfg:
+  tracking_uri: http://mlflow:5000
+
+paper_access_agent:
+  agent_recursion_limit: 30
+  tools:
+    openalex_api_url: https://api.openalex.org/works
+    openalex_api_key: ''
+    openalex_max_results: 3
+    unpaywall_api_url: https://api.unpaywall.org/v2
+    unpaywall_email: ''
+    arxiv_api_url: https://export.arxiv.org/api/query
+    ar5iv_html_url_base: https://ar5iv.labs.arxiv.org/html
+    request_timeout: 30.0
+
+agent_llm_model: ''
+
+agent_llm_params:
+  temperature: 0.0
+
+llm_api_key: ''

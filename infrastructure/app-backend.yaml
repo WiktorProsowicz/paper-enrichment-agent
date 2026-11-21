@@ -27,8 +27,6 @@ services:
     networks:
       - paper-enrichment-agent-network
 
-  # User-facing API of the application: registers arXiv surveys, gives access to the stored
-  # documents and enriches survey citations into footnotes via `footnote-enrichment-agent`. Writes JSONL logs to `app-logs` and exposes Prometheus metrics on `/metrics`.
   main-survey-enricher:
     image: app-base:runtime
     restart: unless-stopped
@@ -48,11 +46,11 @@ services:
         condition: service_healthy
       footnote-enrichment-agent:
         condition: service_started
+      paper-scraping-service:
+        condition: service_started
     networks:
       - paper-enrichment-agent-network
 
-  # Internal LLM agent composing context-aware footnotes from the cited papers. Traces are sent to
-  # the MLflow server. Writes JSONL logs to `app-logs` and exposes Prometheus metrics on `/metrics`.
   footnote-enrichment-agent:
     image: app-base:runtime
     restart: unless-stopped
@@ -62,6 +60,22 @@ services:
       - app-logs:/var/log/paper-enrichment-agent
     healthcheck:
       test: [CMD-SHELL, curl -f http://localhost:8081/health || exit 1]
+      interval: 60s
+      timeout: 5s
+      retries: 10
+    networks:
+      - paper-enrichment-agent-network
+
+  paper-scraping-service:
+    image: app-base:runtime
+    restart: unless-stopped
+    command: [uv, run, python, -m, paper_enrichment_agent.paper_scraping_service.main, json_logs_path=/var/log/paper-enrichment-agent/paper_scraping_service.jsonl,
+      'pdf_parser.marker_api_url=${MARKER_API_URL}', 'pdf_parser.marker_api_token=${MARKER_API_TOKEN}', 'agent_llm_model=${LLM_MODEL}', 'llm_api_key=${LLM_API_KEY}',
+      'paper_access_agent.tools.unpaywall_email=${UNPAYWALL_EMAIL}', 'paper_access_agent.tools.openalex_api_key=${OPENALEX_API_KEY:-}', 'crossref_email=${CROSSREF_EMAIL}']
+    volumes:
+      - app-logs:/var/log/paper-enrichment-agent
+    healthcheck:
+      test: [CMD-SHELL, curl -f http://localhost:8083/health || exit 1]
       interval: 60s
       timeout: 5s
       retries: 10

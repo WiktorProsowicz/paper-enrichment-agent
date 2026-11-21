@@ -9,17 +9,26 @@ Exported classes:
 """
 
 import asyncio
+import base64
+import binascii
 import contextlib
+import io
 import pathlib
+import re
 import uuid
 from collections.abc import AsyncGenerator
+from typing import BinaryIO
 
 import pydantic
 import requests
 
 from paper_enrichment_agent.common.document_manipulators import DocumentGetter
 from paper_enrichment_agent.common.models import document as doc_models
-from paper_enrichment_agent.common.models.misc import DocumentMetadata, SurveyMetadata
+from paper_enrichment_agent.common.models.misc import (
+    DocumentMetadata,
+    PaperMetadata,
+    SurveyMetadata,
+)
 from paper_enrichment_agent.main_survey_enricher.components.db_clients import core
 
 
@@ -36,6 +45,20 @@ class DocDBClient:
     which use a blocking HTTP client, are run in separate threads so that they do not block the
     event loop.
     """
+
+    # Matches base64-encoded image data URIs, e.g. `data:image/jpeg;base64,/9j/...`
+    _DATA_URI_PATTERN = re.compile(
+        r'^data:(?P<mime>image/[\w.+-]+);base64,(?P<data>.*)$', re.DOTALL
+    )
+
+    # Maps the MIME types of embedded images to the extensions of the stored files
+    _DATA_URI_EXTENSIONS = {
+        'image/jpeg': 'jpeg',
+        'image/png': 'png',
+        'image/gif': 'gif',
+        'image/webp': 'webp',
+        'image/svg+xml': 'svg',
+    }
 
     class DocDBClientError(Exception):
         """Base class for exceptions raised by the `DocDBClient`."""
@@ -63,7 +86,11 @@ class DocDBClient:
             ) from e
 
     async def add_document(
-        self, document: doc_models.Document, name: str, description: str
+        self,
+        document: doc_models.Document,
+        name: str,
+        description: str,
+        paper_metadata: PaperMetadata,
     ) -> DocumentMetadata:
         """Adds a document together with its metadata to the document database.
 
@@ -71,12 +98,15 @@ class DocDBClient:
             document: The document to be added to the database.
             name: The name of the document.
             description: The description of the document.
+            paper_metadata: The bibliographic metadata of the paper.
 
         Returns:
             The metadata of the freshly added document.
         """
 
-        doc_metadata = DocumentMetadata(name=name, description=description, images={})
+        doc_metadata = DocumentMetadata(
+            name=name, description=description, images={}, paper_metadata=paper_metadata
+        )
 
         await self._download_and_store_images(document=document, doc_metadata=doc_metadata)
 
@@ -293,21 +323,57 @@ class DocDBClient:
     async def _download_and_store_images(
         self, document: doc_models.Document, doc_metadata: DocumentMetadata
     ) -> None:
-        """Downloads and stores the images of a document in the database."""
+        """Downloads and stores the images of a document in the database.
+
+        Images embedded as `data:` URIs (e.g. by the PDF parser) are decoded instead of
+        downloaded, and their `image_src` is replaced in place with the database path, so that the
+        stored document does not carry the image contents.
+        """
 
         doc_getter = DocumentGetter(document=document)
 
         for image in doc_getter.iter_components_of_type(doc_models.ImgSubfigure):
-            image_extension = image.image_src.split('.')[-1]
-
             image_db_id = uuid.uuid4().hex
-            image_db_path = (
-                f'documents/{doc_metadata.paper_id}/images/{image_db_id}.{image_extension}'
-            )
 
-            await self._transfer_image(image_src=image.image_src, image_db_path=image_db_path)
+            if image.image_src.startswith('data:'):
+                content_type, content = self._decode_data_uri(image.image_src)
+                image_extension = self._DATA_URI_EXTENSIONS.get(content_type, 'bin')
+                image_db_path = (
+                    f'documents/{doc_metadata.paper_id}/images/{image_db_id}.{image_extension}'
+                )
+
+                await self._upload_image_contents(
+                    stream=io.BytesIO(content),
+                    content_type=content_type,
+                    image_db_path=image_db_path,
+                )
+                image.image_src = image_db_path
+
+            else:
+                image_extension = image.image_src.split('.')[-1]
+                image_db_path = (
+                    f'documents/{doc_metadata.paper_id}/images/{image_db_id}.{image_extension}'
+                )
+
+                await self._transfer_image(image_src=image.image_src, image_db_path=image_db_path)
 
             doc_metadata.images[doc_getter.get_path_of_component(image)] = image_db_path
+
+    def _decode_data_uri(self, data_uri: str) -> tuple[str, bytes]:
+        """Decodes a base64 `data:` URI into its MIME type and content."""
+
+        match = self._DATA_URI_PATTERN.match(data_uri)
+
+        if not match:
+            raise self.DocDBClientError(
+                f'Unsupported image data URI: {data_uri[:50]}... (expected a base64 image).'
+            )
+
+        try:
+            return match.group('mime'), base64.b64decode(match.group('data'), validate=True)
+
+        except binascii.Error as e:
+            raise self.DocDBClientError(f'Failed to decode the image data URI: {e}') from e
 
     async def _transfer_image(self, image_src: str, image_db_path: str) -> None:
         """Streams an image from its source URL to the database."""
@@ -327,14 +393,23 @@ class DocDBClient:
                     f'Failed to download image from {image_src}: {e}'
                 ) from e
 
-            try:
-                await self._db_client.write_stream(
-                    path=image_db_path,
-                    stream=response.raw,
-                    content_type=response.headers.get('Content-Type', 'application/octet-stream'),
-                )
+            await self._upload_image_contents(
+                stream=response.raw,
+                content_type=response.headers.get('Content-Type', 'application/octet-stream'),
+                image_db_path=image_db_path,
+            )
 
-            except core.DBClientException as e:
-                raise self.DocDBClientError(
-                    f'Failed to upload image to database at {image_db_path}: {e}'
-                ) from e
+    async def _upload_image_contents(
+        self, stream: BinaryIO, content_type: str, image_db_path: str
+    ) -> None:
+        """Uploads the image read from the stream to the database."""
+
+        try:
+            await self._db_client.write_stream(
+                path=image_db_path, stream=stream, content_type=content_type
+            )
+
+        except core.DBClientException as e:
+            raise self.DocDBClientError(
+                f'Failed to upload image to database at {image_db_path}: {e}'
+            ) from e

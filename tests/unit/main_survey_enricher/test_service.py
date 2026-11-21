@@ -1,4 +1,5 @@
 import contextlib
+import datetime
 import zipfile
 from unittest.mock import AsyncMock, MagicMock, Mock
 
@@ -8,11 +9,16 @@ from paper_enrichment_agent.common.http_client import HTTPClient
 from paper_enrichment_agent.common.models import document as doc_models
 from paper_enrichment_agent.common.models.misc import (
     DocumentMetadata,
+    PaperMetadata,
     RenderedDocumentMetadata,
     SerializedDocFormat,
     SurveyMetadata,
 )
-from paper_enrichment_agent.main_survey_enricher.components.arxiv_parser import ArxivParser
+from paper_enrichment_agent.common.models.service_conn import (
+    ArxivPaperParsingRequest,
+    CitationSignatureParsingRequest,
+    ParsedPaperResponse,
+)
 from paper_enrichment_agent.main_survey_enricher.components.db_clients.doc_db_client import (
     DocDBClient,
 )
@@ -31,6 +37,11 @@ SAMPLE_ARXIV_ID = '1905.09263'
 SAMPLE_NAME = 'Sample Survey'
 SAMPLE_DESCRIPTION = 'Sample Description'
 SAMPLE_SURVEY_ID = 'sample_survey_id'
+SAMPLE_PAPER_METADATA = PaperMetadata(
+    doi='10.48550/arXiv.1706.03762',
+    authors=['Author One'],
+    publication_date=datetime.date(2017, 6, 12),
+)
 
 
 @pytest.fixture
@@ -58,6 +69,7 @@ def sample_survey_document() -> tuple[doc_models.Document, DocumentMetadata]:
         name=SAMPLE_NAME,
         description=SAMPLE_DESCRIPTION,
         images={},
+        paper_metadata=SAMPLE_PAPER_METADATA,
     )
     return document, metadata
 
@@ -78,6 +90,7 @@ def ref1_document() -> tuple[doc_models.Document, DocumentMetadata]:
         name='Reference Paper 1',
         description='This is a sample description for Reference Paper 1.',
         images={},
+        paper_metadata=SAMPLE_PAPER_METADATA,
     )
     return document, metadata
 
@@ -98,21 +111,9 @@ def ref2_document() -> tuple[doc_models.Document, DocumentMetadata]:
         name='Reference Paper 2',
         description='This is a sample description for Reference Paper 2.',
         images={},
+        paper_metadata=SAMPLE_PAPER_METADATA,
     )
     return document, metadata
-
-
-@pytest.fixture
-def patch_arxiv_parser_fails(monkeypatch):
-
-    parser = MagicMock(parse=Mock(side_effect=ArxivParser.ParsingError('Parsing failed')))
-
-    monkeypatch.setattr(
-        'paper_enrichment_agent.main_survey_enricher.service.ArxivParser',
-        Mock(return_value=parser, ParsingError=ArxivParser.ParsingError),
-    )
-
-    return parser
 
 
 @pytest.fixture
@@ -139,7 +140,11 @@ class TestRegisterArxivSurvey:
 
         db_client = MagicMock(spec=DocDBClient)
         db_client.add_document.return_value = DocumentMetadata(
-            paper_id='sample_paper_id', name=SAMPLE_NAME, description=SAMPLE_DESCRIPTION, images={}
+            paper_id='sample_paper_id',
+            name=SAMPLE_NAME,
+            description=SAMPLE_DESCRIPTION,
+            images={},
+            paper_metadata=SAMPLE_PAPER_METADATA,
         )
         db_client.register_as_survey.return_value = SurveyMetadata(
             paper_id='sample_paper_id', referenced_docs={}
@@ -152,20 +157,40 @@ class TestRegisterArxivSurvey:
         return db_client
 
     @pytest.fixture
-    def patch_arxiv_parser(self, monkeypatch, sample_survey_document):
+    def sample_paper_metadata(self) -> PaperMetadata:
 
-        parser = MagicMock(parse=Mock(return_value=sample_survey_document))
-
-        monkeypatch.setattr(
-            'paper_enrichment_agent.main_survey_enricher.service.ArxivParser',
-            Mock(return_value=parser, ParsingError=ArxivParser.ParsingError),
+        return PaperMetadata(
+            doi='10.48550/arXiv.1905.09263',
+            authors=['Author One', 'Author Two'],
+            publication_date=datetime.date(2019, 5, 22),
         )
 
-        return parser
+    @pytest.fixture
+    def mock_scraping_client(self, sample_survey_document, sample_paper_metadata) -> MagicMock:
+
+        scraping_client = MagicMock(spec=HTTPClient)
+        scraping_client.apost.return_value = ParsedPaperResponse(
+            document=sample_survey_document[0], metadata=sample_paper_metadata
+        )
+
+        return scraping_client
+
+    @pytest.fixture
+    def mock_scraping_client_fails(self) -> MagicMock:
+
+        scraping_client = MagicMock(spec=HTTPClient)
+        scraping_client.apost.side_effect = HTTPClient.HTTPClientError('HTTP request failed')
+
+        return scraping_client
 
     @pytest.mark.asyncio
     async def test_adds_document_and_registers_survey(
-        self, patch_arxiv_parser, mock_metrics, mock_db_client, sample_survey_document
+        self,
+        mock_scraping_client,
+        mock_metrics,
+        mock_db_client,
+        sample_survey_document,
+        sample_paper_metadata,
     ):
 
         service = MainSurveyEnricherService(
@@ -173,20 +198,28 @@ class TestRegisterArxivSurvey:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=mock_scraping_client,
         )
         await service.register_arxiv_survey(
             arxiv_id=SAMPLE_ARXIV_ID, name=SAMPLE_NAME, description=SAMPLE_DESCRIPTION
         )
 
-        patch_arxiv_parser.parse.assert_called_once_with(SAMPLE_ARXIV_ID)
+        mock_scraping_client.apost.assert_called_once_with(
+            '/parse_arxiv_paper',
+            ArxivPaperParsingRequest(arxiv_id=SAMPLE_ARXIV_ID),
+            response_schema=ParsedPaperResponse,
+        )
         mock_db_client.add_document.assert_called_once_with(
-            document=sample_survey_document, name=SAMPLE_NAME, description=SAMPLE_DESCRIPTION
+            document=sample_survey_document[0],
+            name=SAMPLE_NAME,
+            description=SAMPLE_DESCRIPTION,
+            paper_metadata=sample_paper_metadata,
         )
         mock_db_client.register_as_survey.assert_called_once_with(paper_id='sample_paper_id')
 
     @pytest.mark.asyncio
     async def test_reports_metrics_on_success(
-        self, patch_arxiv_parser, mock_metrics, mock_db_client
+        self, mock_scraping_client, mock_metrics, mock_db_client
     ):
 
         service = MainSurveyEnricherService(
@@ -194,6 +227,7 @@ class TestRegisterArxivSurvey:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=mock_scraping_client,
         )
         await service.register_arxiv_survey(
             arxiv_id=SAMPLE_ARXIV_ID, name=SAMPLE_NAME, description=SAMPLE_DESCRIPTION
@@ -213,7 +247,7 @@ class TestRegisterArxivSurvey:
 
     @pytest.mark.asyncio
     async def test_raises_when_parsing_fails(
-        self, patch_arxiv_parser_fails, mock_metrics, mock_db_client
+        self, mock_scraping_client_fails, mock_metrics, mock_db_client
     ):
 
         service = MainSurveyEnricherService(
@@ -221,6 +255,7 @@ class TestRegisterArxivSurvey:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=mock_scraping_client_fails,
         )
 
         with pytest.raises(
@@ -236,7 +271,7 @@ class TestRegisterArxivSurvey:
 
     @pytest.mark.asyncio
     async def test_reports_metrics_when_parsing_fails(
-        self, patch_arxiv_parser_fails, mock_metrics, mock_db_client
+        self, mock_scraping_client_fails, mock_metrics, mock_db_client
     ):
 
         service = MainSurveyEnricherService(
@@ -244,6 +279,7 @@ class TestRegisterArxivSurvey:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=mock_scraping_client_fails,
         )
 
         with pytest.raises(MainSurveyEnricherService.MainSurveyEnricherError):
@@ -259,7 +295,7 @@ class TestRegisterArxivSurvey:
 
     @pytest.mark.asyncio
     async def test_raises_when_document_adding_fails(
-        self, patch_arxiv_parser, mock_metrics, mock_db_client
+        self, mock_scraping_client, mock_metrics, mock_db_client
     ):
 
         mock_db_client.add_document.side_effect = DocDBClient.DocDBClientError('Adding failed')
@@ -269,6 +305,7 @@ class TestRegisterArxivSurvey:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=mock_scraping_client,
         )
 
         with pytest.raises(
@@ -284,7 +321,7 @@ class TestRegisterArxivSurvey:
 
     @pytest.mark.asyncio
     async def test_raises_when_survey_registration_fails(
-        self, patch_arxiv_parser, mock_metrics, mock_db_client
+        self, mock_scraping_client, mock_metrics, mock_db_client
     ):
 
         mock_db_client.register_as_survey.side_effect = DocDBClient.DocDBClientError(
@@ -296,6 +333,7 @@ class TestRegisterArxivSurvey:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=mock_scraping_client,
         )
 
         with pytest.raises(
@@ -311,7 +349,7 @@ class TestRegisterArxivSurvey:
 
     @pytest.mark.asyncio
     async def test_does_not_swallow_unexpected_errors(
-        self, patch_arxiv_parser, mock_metrics, mock_db_client
+        self, mock_scraping_client, mock_metrics, mock_db_client
     ):
 
         mock_db_client.add_document.side_effect = RuntimeError('Unexpected failure')
@@ -321,12 +359,401 @@ class TestRegisterArxivSurvey:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=mock_scraping_client,
         )
 
         with pytest.raises(RuntimeError, match='Unexpected failure'):
             await service.register_arxiv_survey(
                 arxiv_id=SAMPLE_ARXIV_ID, name=SAMPLE_NAME, description=SAMPLE_DESCRIPTION
             )
+
+
+class TestParseReferencedPaperPdf:
+    SAMPLE_DOI = '10.1145/3065386'
+    SAMPLE_PDF_CONTENT = b'%PDF-1.5 fake content'
+
+    @pytest.fixture
+    def stored_survey(self, sample_survey_document) -> doc_models.Document:
+
+        return sample_survey_document[0]
+
+    @pytest.fixture
+    def parsed_paper(self, ref1_document) -> ParsedPaperResponse:
+
+        return ParsedPaperResponse(
+            document=ref1_document[0],
+            metadata=PaperMetadata(
+                doi=self.SAMPLE_DOI,
+                authors=['Author One'],
+                publication_date=datetime.date(2017, 5, 24),
+            ),
+        )
+
+    @pytest.fixture
+    def mock_db_client(self, stored_survey) -> MagicMock:
+
+        @contextlib.asynccontextmanager
+        async def document_struct_ref(paper_id):
+            yield stored_survey.model_copy(deep=True)
+
+        db_client = MagicMock(spec=DocDBClient)
+        db_client.get_survey_info.return_value = SurveyMetadata(
+            paper_id=SAMPLE_SURVEY_ID, referenced_docs={'ref2': 'ref_paper_id_2'}
+        )
+        db_client.get_document_struct_ref.side_effect = document_struct_ref
+        db_client.add_document.return_value = DocumentMetadata(
+            paper_id='new_paper_id',
+            name='Reference Paper 1',
+            description='desc',
+            images={},
+            paper_metadata=SAMPLE_PAPER_METADATA,
+        )
+
+        return db_client
+
+    @pytest.fixture
+    def mock_scraping_client(self, parsed_paper) -> MagicMock:
+
+        scraping_client = MagicMock(spec=HTTPClient)
+        scraping_client.apost_multipart.return_value = parsed_paper
+
+        return scraping_client
+
+    @pytest.fixture
+    def service(self, mock_metrics, mock_db_client, mock_scraping_client):
+
+        return MainSurveyEnricherService(
+            metrics=mock_metrics,
+            doc_db_client=mock_db_client,
+            rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=mock_scraping_client,
+        )
+
+    async def call(self, service, reference_id: str = 'ref1') -> DocumentMetadata:
+
+        return await service.parse_referenced_paper_pdf(
+            survey_id=SAMPLE_SURVEY_ID,
+            reference_id=reference_id,
+            pdf_content=self.SAMPLE_PDF_CONTENT,
+            file_name='paper.pdf',
+            doi=self.SAMPLE_DOI,
+        )
+
+    @pytest.mark.asyncio
+    async def test_delegates_pdf_and_assigns_document_to_reference(
+        self, service, mock_scraping_client, mock_db_client, parsed_paper
+    ):
+
+        doc_metadata = await self.call(service)
+
+        assert doc_metadata.paper_id == 'new_paper_id'
+        mock_scraping_client.apost_multipart.assert_called_once_with(
+            '/download_pdf_paper',
+            data={'doi': self.SAMPLE_DOI},
+            files={'file': ('paper.pdf', self.SAMPLE_PDF_CONTENT, 'application/pdf')},
+            response_schema=ParsedPaperResponse,
+        )
+        mock_db_client.add_document.assert_called_once_with(
+            document=parsed_paper.document,
+            name='Reference Paper 1',
+            description='Reference Paper 1',
+            paper_metadata=parsed_paper.metadata,
+        )
+        mock_db_client.add_referenced_document.assert_called_once_with(
+            survey_id=SAMPLE_SURVEY_ID, reference_id='ref1', referenced_paper_id='new_paper_id'
+        )
+
+    @pytest.mark.asyncio
+    async def test_reports_metrics_on_success(self, service, mock_metrics):
+
+        await self.call(service)
+
+        mock_metrics.papers_parsed.labels.assert_called_once_with(source='pdf', status='success')
+        mock_metrics.papers_added.labels.assert_called_once_with(source='pdf')
+        mock_metrics.paper_parsing_time.observe.assert_called_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ('reference_id', 'error'),
+        [('unknown_ref', 'has no bibliography entry'), ('ref2', 'is already assigned')],
+    )
+    async def test_raises_on_invalid_reference_without_parsing(
+        self, service, mock_scraping_client, mock_db_client, reference_id, error
+    ):
+
+        with pytest.raises(MainSurveyEnricherService.MainSurveyEnricherError, match=error):
+            await self.call(service, reference_id=reference_id)
+
+        mock_scraping_client.apost_multipart.assert_not_called()
+        mock_db_client.add_document.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_raises_when_parsing_fails(
+        self, service, mock_scraping_client, mock_db_client, mock_metrics
+    ):
+
+        mock_scraping_client.apost_multipart.side_effect = HTTPClient.HTTPClientError(
+            'HTTP request failed'
+        )
+
+        with pytest.raises(
+            MainSurveyEnricherService.MainSurveyEnricherError,
+            match='Failed to parse the PDF paper.pdf of the reference ref1',
+        ):
+            await self.call(service)
+
+        mock_metrics.papers_parsed.labels.assert_called_once_with(source='pdf', status='failure')
+        mock_db_client.add_document.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_raises_when_db_operation_fails(self, service, mock_db_client, mock_metrics):
+
+        mock_db_client.add_referenced_document.side_effect = DocDBClient.DocDBClientError(
+            'DB failure'
+        )
+
+        with pytest.raises(MainSurveyEnricherService.MainSurveyEnricherError, match='DB failure'):
+            await self.call(service)
+
+        mock_metrics.papers_added.labels.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_does_not_swallow_unexpected_errors(self, service, mock_scraping_client):
+
+        mock_scraping_client.apost_multipart.side_effect = RuntimeError('Unexpected failure')
+
+        with pytest.raises(RuntimeError, match='Unexpected failure'):
+            await self.call(service)
+
+
+class TestDownloadReferencedPaper:
+    CITATION_PATH = '/sections/S1/P1/C1'
+    CITATION_SIGNATURE = 'A. Vaswani et al. Attention is all you need. NeurIPS, 2017.'
+
+    @pytest.fixture
+    def stored_survey(self) -> doc_models.Document:
+
+        return doc_models.Document(
+            title='Survey Title',
+            abstract='Survey abstract.',
+            description=None,
+            sections=[
+                doc_models.Section(
+                    component_id='S1',
+                    title='Introduction',
+                    components=[
+                        doc_models.Paragraph(
+                            component_id='P1',
+                            elements=[
+                                'Attention was introduced in ',
+                                doc_models.Reference(
+                                    component_id='C1',
+                                    ref_type='citation',
+                                    target='bib.bib1',
+                                    content_text='1',
+                                ),
+                                doc_models.Reference(
+                                    component_id='C2',
+                                    ref_type='citation',
+                                    target='bib.bib2',
+                                    content_text='2',
+                                ),
+                                doc_models.Reference(
+                                    component_id='E1',
+                                    ref_type='element',
+                                    target='#S1',
+                                    content_text='Section 1',
+                                ),
+                            ],
+                        )
+                    ],
+                )
+            ],
+            footnotes=[],
+            referenced_papers=[
+                ('bib.bib1', self.CITATION_SIGNATURE),
+                ('bib.bib2', 'Already assigned paper'),
+            ],
+        )
+
+    @pytest.fixture
+    def parsed_paper(self, ref1_document) -> ParsedPaperResponse:
+
+        return ParsedPaperResponse(document=ref1_document[0], metadata=SAMPLE_PAPER_METADATA)
+
+    @pytest.fixture
+    def mock_db_client(self, stored_survey) -> MagicMock:
+
+        @contextlib.asynccontextmanager
+        async def document_struct_ref(paper_id):
+            yield stored_survey.model_copy(deep=True)
+
+        db_client = MagicMock(spec=DocDBClient)
+        db_client.get_survey_info.return_value = SurveyMetadata(
+            paper_id=SAMPLE_SURVEY_ID, referenced_docs={'bib.bib2': 'ref_paper_id_2'}
+        )
+        db_client.get_document_struct_ref.side_effect = document_struct_ref
+        db_client.add_document.return_value = DocumentMetadata(
+            paper_id='new_paper_id',
+            name='Reference Paper 1',
+            description=self.CITATION_SIGNATURE,
+            images={},
+            paper_metadata=SAMPLE_PAPER_METADATA,
+        )
+
+        return db_client
+
+    @pytest.fixture
+    def mock_scraping_client(self, parsed_paper) -> MagicMock:
+
+        scraping_client = MagicMock(spec=HTTPClient)
+        scraping_client.apost.return_value = MainSurveyEnricherService._OptionalParsedPaper(
+            parsed_paper
+        )
+
+        return scraping_client
+
+    @pytest.fixture
+    def service(self, mock_metrics, mock_db_client, mock_scraping_client):
+
+        return MainSurveyEnricherService(
+            metrics=mock_metrics,
+            doc_db_client=mock_db_client,
+            rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=mock_scraping_client,
+        )
+
+    async def call(self, service, citation_path: str = CITATION_PATH) -> DocumentMetadata | None:
+
+        return await service.download_referenced_paper(
+            survey_id=SAMPLE_SURVEY_ID, citation_path=citation_path
+        )
+
+    @pytest.mark.asyncio
+    async def test_sends_citation_signature_and_assigns_document_to_reference(
+        self, service, mock_scraping_client, mock_db_client, parsed_paper
+    ):
+
+        doc_metadata = await self.call(service)
+
+        assert doc_metadata is not None
+        assert doc_metadata.paper_id == 'new_paper_id'
+        mock_scraping_client.apost.assert_called_once_with(
+            '/parse_paper_from_citation_signature',
+            CitationSignatureParsingRequest(citation_signature=self.CITATION_SIGNATURE),
+            response_schema=MainSurveyEnricherService._OptionalParsedPaper,
+        )
+        mock_db_client.add_document.assert_called_once_with(
+            document=parsed_paper.document,
+            name='Reference Paper 1',
+            description=self.CITATION_SIGNATURE,
+            paper_metadata=SAMPLE_PAPER_METADATA,
+        )
+        mock_db_client.add_referenced_document.assert_called_once_with(
+            survey_id=SAMPLE_SURVEY_ID, reference_id='bib.bib1', referenced_paper_id='new_paper_id'
+        )
+
+    @pytest.mark.asyncio
+    async def test_reports_metrics_on_success(self, service, mock_metrics):
+
+        await self.call(service)
+
+        mock_metrics.papers_parsed.labels.assert_called_once_with(
+            source='citation', status='success'
+        )
+        mock_metrics.papers_added.labels.assert_called_once_with(source='citation')
+        mock_metrics.paper_parsing_time.observe.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_paper_not_found(
+        self, service, mock_scraping_client, mock_db_client, mock_metrics
+    ):
+
+        mock_scraping_client.apost.return_value = MainSurveyEnricherService._OptionalParsedPaper(
+            None
+        )
+
+        assert await self.call(service) is None
+
+        mock_metrics.papers_parsed.labels.assert_called_once_with(
+            source='citation', status='failure'
+        )
+        mock_metrics.papers_added.labels.assert_not_called()
+        mock_db_client.add_document.assert_not_called()
+        mock_db_client.add_referenced_document.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ('citation_path', 'error'),
+        [
+            ('/sections/S1/P1/E1', 'is not a citation reference'),
+            ('/sections/S1/P1/missing', 'missing'),
+            ('/sections/S1/P1/C2', 'is already assigned'),
+        ],
+    )
+    async def test_raises_on_invalid_citation_without_downloading(
+        self, service, mock_scraping_client, mock_db_client, citation_path, error
+    ):
+
+        with pytest.raises(MainSurveyEnricherService.MainSurveyEnricherError, match=error):
+            await self.call(service, citation_path=citation_path)
+
+        mock_scraping_client.apost.assert_not_called()
+        mock_db_client.add_document.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_raises_when_citation_target_not_in_bibliography(
+        self, service, mock_scraping_client, stored_survey
+    ):
+
+        stored_survey.referenced_papers = [('bib.bib2', 'Already assigned paper')]
+
+        with pytest.raises(
+            MainSurveyEnricherService.MainSurveyEnricherError, match='has no bibliography entry'
+        ):
+            await self.call(service)
+
+        mock_scraping_client.apost.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_raises_when_downloading_fails(
+        self, service, mock_scraping_client, mock_db_client, mock_metrics
+    ):
+
+        mock_scraping_client.apost.side_effect = HTTPClient.HTTPClientError('HTTP request failed')
+
+        with pytest.raises(
+            MainSurveyEnricherService.MainSurveyEnricherError,
+            match='Failed to download the paper cited at',
+        ):
+            await self.call(service)
+
+        mock_metrics.papers_parsed.labels.assert_called_once_with(
+            source='citation', status='failure'
+        )
+        mock_db_client.add_document.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_raises_when_db_operation_fails(self, service, mock_db_client, mock_metrics):
+
+        mock_db_client.add_referenced_document.side_effect = DocDBClient.DocDBClientError(
+            'DB failure'
+        )
+
+        with pytest.raises(MainSurveyEnricherService.MainSurveyEnricherError, match='DB failure'):
+            await self.call(service)
+
+        mock_metrics.papers_added.labels.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_does_not_swallow_unexpected_errors(self, service, mock_scraping_client):
+
+        mock_scraping_client.apost.side_effect = RuntimeError('Unexpected failure')
+
+        with pytest.raises(RuntimeError, match='Unexpected failure'):
+            await self.call(service)
 
 
 class TestRemoveSurvey:
@@ -348,6 +775,7 @@ class TestRemoveSurvey:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
         await service.remove_survey(SAMPLE_SURVEY_ID)
 
@@ -362,6 +790,7 @@ class TestRemoveSurvey:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
         await service.remove_survey(survey_id=SAMPLE_SURVEY_ID)
 
@@ -383,6 +812,7 @@ class TestRemoveSurvey:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
         await service.remove_survey(survey_id=SAMPLE_SURVEY_ID)
 
@@ -400,6 +830,7 @@ class TestRemoveSurvey:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(
@@ -422,6 +853,7 @@ class TestRemoveSurvey:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(
@@ -443,6 +875,7 @@ class TestRemoveSurvey:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(RuntimeError, match='Unexpected failure'):
@@ -474,6 +907,7 @@ class TestListSurveys:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
         surveys = await service.list_surveys()
 
@@ -497,6 +931,7 @@ class TestListSurveys:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(
@@ -517,6 +952,7 @@ class TestListSurveys:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(RuntimeError, match='Unexpected failure'):
@@ -542,6 +978,7 @@ class TestGetSurveyInfo:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
         survey_info = await service.get_survey_info(survey_id=SAMPLE_SURVEY_ID)
 
@@ -561,6 +998,7 @@ class TestGetSurveyInfo:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(
@@ -580,6 +1018,7 @@ class TestGetDocumentDetails:
             name=SAMPLE_NAME,
             description=SAMPLE_DESCRIPTION,
             images={},
+            paper_metadata=SAMPLE_PAPER_METADATA,
         )
         db_client.get_document_struct_ref.return_value.__aenter__.return_value = (
             doc_models.Document(
@@ -601,6 +1040,7 @@ class TestGetDocumentDetails:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
         metadata, document = await service.get_document_details(paper_id='sample_paper_id')
 
@@ -649,6 +1089,7 @@ class TestRemoveDocumentComponent:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(
@@ -667,6 +1108,7 @@ class TestRemoveDocumentComponent:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
 
         await service.remove_document_component(
@@ -722,6 +1164,7 @@ class TestRenderDocument:
             name=SAMPLE_NAME,
             description=SAMPLE_DESCRIPTION,
             images={'/sections/S1/F1/I1': SAMPLE_IMAGE_DB_PATH},
+            paper_metadata=SAMPLE_PAPER_METADATA,
         )
         db_client.get_document_struct_ref.return_value.__aenter__.return_value = document_with_image
 
@@ -760,6 +1203,7 @@ class TestRenderDocument:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=mock_rendered_db_client,
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
 
     @pytest.mark.asyncio
@@ -905,6 +1349,7 @@ class TestListRenderedDocuments:
             doc_db_client=MagicMock(spec=DocDBClient),
             rendered_doc_db_client=rendered_db_client,
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
 
         assert await service.list_rendered_documents('p1') == rendered_docs
@@ -924,6 +1369,7 @@ class TestListRenderedDocuments:
             doc_db_client=MagicMock(spec=DocDBClient),
             rendered_doc_db_client=rendered_db_client,
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
 
         with pytest.raises(
@@ -950,6 +1396,7 @@ class TestDownloadRenderedDocument:
             doc_db_client=MagicMock(spec=DocDBClient),
             rendered_doc_db_client=mock_rendered_db_client,
             footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
 
     @pytest.mark.asyncio
@@ -1115,6 +1562,7 @@ class TestEnrichFootnote:
             doc_db_client=mock_db_client,
             rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
             footnote_agent_client=mock_footnote_agent_client,
+            paper_scraping_client=MagicMock(spec=HTTPClient),
         )
 
     def assert_failure_recorded(self, mock_metrics, stored_documents, sample_survey):

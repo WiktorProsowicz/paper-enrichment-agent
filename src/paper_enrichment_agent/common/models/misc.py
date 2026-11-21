@@ -13,6 +13,18 @@ import pydantic
 from pydantic import Field
 
 
+class PaperMetadata(pydantic.BaseModel):
+    """Represents the bibliographic metadata of a scraped paper."""
+
+    doi: Annotated[str, Field(description='The DOI of the paper.', min_length=1)]
+    authors: Annotated[
+        list[str], Field(description='The full names of the authors, in the publication order.')
+    ]
+    publication_date: Annotated[
+        datetime.date, Field(description='The date of the first publication of the paper.')
+    ]
+
+
 class DocumentMetadata(pydantic.BaseModel):
     """Represents the metadata of a document being in the system.
 
@@ -33,6 +45,15 @@ class DocumentMetadata(pydantic.BaseModel):
             'image path in the document, and the value is the path in the database.'
         ),
     ]
+    paper_metadata: Annotated[
+        PaperMetadata,
+        Field(
+            description=(
+                'The bibliographic metadata (DOI, authors, publication date) of the paper, as '
+                'returned by the `paper_scraping_service` service.'
+            )
+        ),
+    ]
 
 
 class SurveyMetadata(pydantic.BaseModel):
@@ -51,6 +72,36 @@ class SurveyMetadata(pydantic.BaseModel):
                 ' and the value is the `paper_id` of the referenced document.'
             )
         ),
+    ]
+
+
+class PaperAccessType(enum.StrEnum):
+    """Enumerates the kinds of public sources of papers."""
+
+    # The paper has an HTML version on arXiv, the source is its arXiv ID
+    ARXIV = 'arxiv'
+
+    # The paper is available as an open access PDF, the source is the URL of the PDF
+    PDF = 'pdf'
+
+
+class PaperAccessInfo(pydantic.BaseModel):
+    """Describes how to access a publicly available version of a paper."""
+
+    type: Annotated[PaperAccessType, Field(description='The kind of the public source.')]
+    source: Annotated[
+        str,
+        Field(
+            description=(
+                'The arXiv ID of the paper (e.g. `1706.03762`) for the `arxiv` type, or the URL of '
+                'the PDF file for the `pdf` type.'
+            ),
+            min_length=1,
+        ),
+    ]
+    metadata: Annotated[
+        PaperMetadata,
+        Field(description='The bibliographic metadata of the paper.'),
     ]
 
 

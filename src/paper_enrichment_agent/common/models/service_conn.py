@@ -12,7 +12,12 @@ import pydantic
 from pydantic import Field
 
 from paper_enrichment_agent.common.models import document as doc_models
-from paper_enrichment_agent.common.models.misc import DocumentMetadata, SerializedDocFormat
+from paper_enrichment_agent.common.models.misc import (
+    DocumentMetadata,
+    PaperAccessInfo,
+    PaperMetadata,
+    SerializedDocFormat,
+)
 
 
 class FootnoteEnrichmentRequest(pydantic.BaseModel):
@@ -124,5 +129,84 @@ class SurveyFootnoteEnrichmentRequest(pydantic.BaseModel):
                 '`/sections/<id>/<paragraph_id>/<reference_id>`.'
             ),
             min_length=1,
+        ),
+    ]
+
+
+class ReferencedPaperDownloadRequest(pydantic.BaseModel):
+    """Contains request data for finding and adding a paper cited by a survey."""
+
+    survey_id: Annotated[
+        str, Field(description='The ID of the survey containing the citation.', min_length=1)
+    ]
+    citation_path: Annotated[
+        str,
+        Field(
+            description=(
+                'The POSIX-like path of a citation reference to the paper in the survey, e.g. '
+                '`/sections/<id>/<paragraph_id>/<reference_id>`.'
+            ),
+            min_length=1,
+        ),
+    ]
+
+
+class ArxivPaperParsingRequest(pydantic.BaseModel):
+    """Contains request data for scraping and parsing an arXiv paper."""
+
+    arxiv_id: Annotated[
+        str,
+        Field(description='The arXiv ID of the paper to parse, e.g. `1706.03762`.', min_length=1),
+    ]
+
+
+class ParsedPaperResponse(pydantic.BaseModel):
+    """Contains a scraped paper parsed into the document structure, along with its metadata."""
+
+    document: Annotated[doc_models.Document, Field(description='The structure of the paper.')]
+    metadata: Annotated[
+        PaperMetadata, Field(description='The bibliographic metadata of the paper.')
+    ]
+
+
+class CitationSignatureParsingRequest(pydantic.BaseModel):
+    """Contains request data for finding, scraping and parsing a paper by its citation."""
+
+    citation_signature: Annotated[
+        str,
+        Field(
+            description=(
+                'The citation signature of the paper, as found in the bibliography of the citing '
+                'paper, e.g. `A. Vaswani et al. Attention is all you need. NeurIPS, 2017.`.'
+            ),
+            min_length=1,
+        ),
+    ]
+
+
+class PaperAccessResolutionRequest(pydantic.BaseModel):
+    """Contains request data for finding the best public source of a paper by its citation."""
+
+    citation_signature: Annotated[
+        str,
+        Field(
+            description=(
+                'The citation signature of the paper, as found in the bibliography of the citing '
+                'paper, e.g. `A. Vaswani et al. Attention is all you need. NeurIPS, 2017.`.'
+            ),
+            min_length=1,
+        ),
+    ]
+
+
+class PaperAccessResolutionResponse(pydantic.BaseModel):
+    """Contains the resolved public source of a cited paper, along with its metadata."""
+
+    access_info: Annotated[
+        PaperAccessInfo | None,
+        Field(
+            description=(
+                'The access information of the paper, or None if no public version of it was found.'
+            )
         ),
     ]

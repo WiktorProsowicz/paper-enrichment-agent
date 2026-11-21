@@ -33,20 +33,7 @@ def main(eval_cfg_dict: omegaconf.DictConfig) -> None:
     if eval_cfg.active_suites is None:
         _logger().info('No active suites specified. Running all test suites.')
 
-        subprocess.run(
-            [
-                sys.executable,
-                '-m',
-                'pytest',
-                '--capture=tee-sys',
-                '--show-capture=all',
-                '-v',
-                '--llm-eval-cfg',
-                eval_cfg.model_dump_json(),
-                'tests/llm_eval/suites/',
-            ],
-            check=True,
-        )
+        _run_pytest(eval_cfg, 'tests/llm_eval/suites/')
         return
 
     _logger().info('Running active test suites.')
@@ -54,6 +41,16 @@ def main(eval_cfg_dict: omegaconf.DictConfig) -> None:
     for suite_name in eval_cfg.active_suites:
         _logger().info(f'Running test suite: {suite_name}')
 
+        _run_pytest(eval_cfg, f'tests/llm_eval/suites/{suite_name}')
+
+
+def _run_pytest(eval_cfg: harness_core.EvaluationConfig, tests_path: str) -> None:
+    """Runs pytest on the given tests, exiting with pytest's exit code if it fails.
+
+    The failed command is not reported, since it contains the configuration, including secrets.
+    """
+
+    try:
         subprocess.run(
             [
                 sys.executable,
@@ -64,10 +61,16 @@ def main(eval_cfg_dict: omegaconf.DictConfig) -> None:
                 '-v',
                 '--llm-eval-cfg',
                 eval_cfg.model_dump_json(),
-                f'tests/llm_eval/suites/{suite_name}',
+                tests_path,
             ],
             check=True,
         )
+
+    except subprocess.CalledProcessError as e:
+        _logger().critical(
+            'Running pytest caused an error.', tests_path=tests_path, exit_code=e.returncode
+        )
+        sys.exit(e.returncode)
 
 
 if __name__ == '__main__':

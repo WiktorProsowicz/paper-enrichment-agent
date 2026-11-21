@@ -100,6 +100,21 @@ class AppCfg(pydantic.BaseModel):
             gt=0,
         ),
     ]
+    paper_scraping_service_url: Annotated[
+        str,
+        Field(description='The base URL of the `paper_scraping_service` service.', min_length=1),
+    ]
+    paper_scraping_timeout: Annotated[
+        float,
+        Field(
+            description=(
+                'The timeout (in seconds) of a single paper parsing request sent to the '
+                '`paper_scraping_service` service. It has to accommodate the paper access agent '
+                'run, the paper download and the conversion of PDFs by the marker API.'
+            ),
+            gt=0,
+        ),
+    ]
 
 
 def create_app(service: MainSurveyEnricherService) -> fastapi.FastAPI:
@@ -137,6 +152,29 @@ def create_app(service: MainSurveyEnricherService) -> fastapi.FastAPI:
     async def register_arxiv_survey(request: conn_models.ArxivSurveyRegistrationRequest) -> None:
         await service.register_arxiv_survey(
             arxiv_id=request.arxiv_id, name=request.name, description=request.description
+        )
+
+    @app.post('/parse_referenced_paper_pdf')
+    async def parse_referenced_paper_pdf(
+        file: fastapi.UploadFile,
+        survey_id: Annotated[str, fastapi.Form(min_length=1)],
+        reference_id: Annotated[str, fastapi.Form(min_length=1)],
+        doi: Annotated[str, fastapi.Form(min_length=1)],
+    ) -> misc_models.DocumentMetadata:
+        return await service.parse_referenced_paper_pdf(
+            survey_id=survey_id,
+            reference_id=reference_id,
+            pdf_content=await file.read(),
+            file_name=file.filename or '',
+            doi=doi,
+        )
+
+    @app.post('/download_referenced_paper')
+    async def download_referenced_paper(
+        request: conn_models.ReferencedPaperDownloadRequest,
+    ) -> misc_models.DocumentMetadata | None:
+        return await service.download_referenced_paper(
+            survey_id=request.survey_id, citation_path=request.citation_path
         )
 
     @app.post('/remove_survey')
@@ -246,11 +284,16 @@ def main(hydra_cfg: omegaconf.DictConfig) -> None:
         timeout=app_cfg.footnote_enrichment_timeout,
     )
 
+    paper_scraping_client = HTTPClient(
+        base_url=app_cfg.paper_scraping_service_url, timeout=app_cfg.paper_scraping_timeout
+    )
+
     service = MainSurveyEnricherService(
         metrics=Metrics(),
         doc_db_client=doc_db_client,
         rendered_doc_db_client=rendered_db_client,
         footnote_agent_client=footnote_agent_client,
+        paper_scraping_client=paper_scraping_client,
     )
 
     app = create_app(service=service)
