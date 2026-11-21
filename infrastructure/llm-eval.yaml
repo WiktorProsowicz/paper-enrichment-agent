@@ -20,7 +20,7 @@ services:
     container_name: llm-eval-paper-scraping-service
     restart: unless-stopped
     command: [uv, run, python, -m, paper_enrichment_agent.paper_scraping_service.main, 'agent_llm_model=${LLM_MODEL}', 'llm_api_key=${LLM_API_KEY}', 'paper_access_agent.tools.unpaywall_email=${UNPAYWALL_EMAIL}',
-      'paper_access_agent.tools.openalex_api_key=${OPENALEX_API_KEY:-}', pdf_parser.marker_api_url=NONE, pdf_parser.marker_api_token=NONE]
+      'paper_access_agent.tools.openalex_api_key=${OPENALEX_API_KEY:-}', pdf_parser.marker_api_url=NONE, pdf_parser.marker_api_token=NONE, crossref_email=NONE]
     healthcheck:
       test: [CMD-SHELL, curl -f http://localhost:8083/health || exit 1]
       interval: 5s
