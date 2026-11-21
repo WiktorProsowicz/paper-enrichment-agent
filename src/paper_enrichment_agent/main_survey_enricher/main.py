@@ -109,8 +109,8 @@ class AppCfg(pydantic.BaseModel):
         Field(
             description=(
                 'The timeout (in seconds) of a single paper parsing request sent to the '
-                '`paper_scraping_service` service. It has to accommodate the paper download and '
-                'the conversion of uploaded PDFs by the marker API.'
+                '`paper_scraping_service` service. It has to accommodate the paper access agent '
+                'run, the paper download and the conversion of PDFs by the marker API.'
             ),
             gt=0,
         ),
@@ -167,6 +167,14 @@ def create_app(service: MainSurveyEnricherService) -> fastapi.FastAPI:
             pdf_content=await file.read(),
             file_name=file.filename or '',
             doi=doi,
+        )
+
+    @app.post('/download_referenced_paper')
+    async def download_referenced_paper(
+        request: conn_models.ReferencedPaperDownloadRequest,
+    ) -> misc_models.DocumentMetadata | None:
+        return await service.download_referenced_paper(
+            survey_id=request.survey_id, citation_path=request.citation_path
         )
 
     @app.post('/remove_survey')

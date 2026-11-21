@@ -24,7 +24,11 @@ import requests
 
 from paper_enrichment_agent.common.document_manipulators import DocumentGetter
 from paper_enrichment_agent.common.models import document as doc_models
-from paper_enrichment_agent.common.models.misc import DocumentMetadata, SurveyMetadata
+from paper_enrichment_agent.common.models.misc import (
+    DocumentMetadata,
+    PaperMetadata,
+    SurveyMetadata,
+)
 from paper_enrichment_agent.main_survey_enricher.components.db_clients import core
 
 
@@ -82,7 +86,11 @@ class DocDBClient:
             ) from e
 
     async def add_document(
-        self, document: doc_models.Document, name: str, description: str
+        self,
+        document: doc_models.Document,
+        name: str,
+        description: str,
+        paper_metadata: PaperMetadata,
     ) -> DocumentMetadata:
         """Adds a document together with its metadata to the document database.
 
@@ -90,12 +98,15 @@ class DocDBClient:
             document: The document to be added to the database.
             name: The name of the document.
             description: The description of the document.
+            paper_metadata: The bibliographic metadata of the paper.
 
         Returns:
             The metadata of the freshly added document.
         """
 
-        doc_metadata = DocumentMetadata(name=name, description=description, images={})
+        doc_metadata = DocumentMetadata(
+            name=name, description=description, images={}, paper_metadata=paper_metadata
+        )
 
         await self._download_and_store_images(document=document, doc_metadata=doc_metadata)
 

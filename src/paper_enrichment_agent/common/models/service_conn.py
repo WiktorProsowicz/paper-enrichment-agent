@@ -133,6 +133,24 @@ class SurveyFootnoteEnrichmentRequest(pydantic.BaseModel):
     ]
 
 
+class ReferencedPaperDownloadRequest(pydantic.BaseModel):
+    """Contains request data for finding and adding a paper cited by a survey."""
+
+    survey_id: Annotated[
+        str, Field(description='The ID of the survey containing the citation.', min_length=1)
+    ]
+    citation_path: Annotated[
+        str,
+        Field(
+            description=(
+                'The POSIX-like path of a citation reference to the paper in the survey, e.g. '
+                '`/sections/<id>/<paragraph_id>/<reference_id>`.'
+            ),
+            min_length=1,
+        ),
+    ]
+
+
 class ArxivPaperParsingRequest(pydantic.BaseModel):
     """Contains request data for scraping and parsing an arXiv paper."""
 

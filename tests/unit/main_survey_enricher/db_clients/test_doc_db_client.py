@@ -1,16 +1,28 @@
+import datetime
+
 import requests
 
 import pytest
 from unittest.mock import MagicMock, Mock, call, create_autospec
 
 from paper_enrichment_agent.common.models import document as doc_models
-from paper_enrichment_agent.common.models.misc import SurveyMetadata, DocumentMetadata
+from paper_enrichment_agent.common.models.misc import (
+    DocumentMetadata,
+    PaperMetadata,
+    SurveyMetadata,
+)
 from paper_enrichment_agent.main_survey_enricher.components.db_clients.core import (
     DBClient,
     DBClientException,
 )
 from paper_enrichment_agent.main_survey_enricher.components.db_clients.doc_db_client import (
     DocDBClient,
+)
+
+SAMPLE_PAPER_METADATA = PaperMetadata(
+    doi='10.48550/arXiv.1706.03762',
+    authors=['Ashish Vaswani', 'Noam Shazeer'],
+    publication_date=datetime.date(2017, 6, 12),
 )
 
 _REQUESTS_GET_PATH = (
@@ -140,11 +152,15 @@ class TestAddDocument:
     ):
 
         doc_meta = await doc_db_client.add_document(
-            document=sample_document, name='Sample Document', description='Sample Description'
+            document=sample_document,
+            name='Sample Document',
+            description='Sample Description',
+            paper_metadata=SAMPLE_PAPER_METADATA,
         )
 
         assert doc_meta.name == 'Sample Document'
         assert doc_meta.description == 'Sample Description'
+        assert doc_meta.paper_metadata == SAMPLE_PAPER_METADATA
 
         image_paths = [c.kwargs['path'] for c in mock_db_client.write_stream.await_args_list]
         assert len(image_paths) == 2
@@ -170,7 +186,10 @@ class TestAddDocument:
 
         with pytest.raises(DocDBClient.DocDBClientError, match='Failed to download image from'):
             await doc_db_client.add_document(
-                document=sample_document, name='Sample Document', description='Sample Description'
+                document=sample_document,
+                name='Sample Document',
+                description='Sample Description',
+                paper_metadata=SAMPLE_PAPER_METADATA,
             )
 
         mock_db_client.write_stream.assert_not_awaited()
@@ -183,7 +202,10 @@ class TestAddDocument:
 
         with pytest.raises(DocDBClient.DocDBClientError, match='Failed to download image from'):
             await doc_db_client.add_document(
-                document=sample_document, name='Sample Document', description='Sample Description'
+                document=sample_document,
+                name='Sample Document',
+                description='Sample Description',
+                paper_metadata=SAMPLE_PAPER_METADATA,
             )
 
         mock_db_client.write_stream.assert_not_awaited()
@@ -199,7 +221,10 @@ class TestAddDocument:
             DocDBClient.DocDBClientError, match='Failed to upload image to database'
         ):
             await doc_db_client.add_document(
-                document=sample_document, name='Sample Document', description='Sample Description'
+                document=sample_document,
+                name='Sample Document',
+                description='Sample Description',
+                paper_metadata=SAMPLE_PAPER_METADATA,
             )
 
         assert mock_db_client.write_stream.await_count == 2
@@ -214,7 +239,10 @@ class TestAddDocument:
 
         with pytest.raises(DocDBClient.DocDBClientError, match='Failed to add the document'):
             await doc_db_client.add_document(
-                document=sample_document, name='Sample Document', description='Sample Description'
+                document=sample_document,
+                name='Sample Document',
+                description='Sample Description',
+                paper_metadata=SAMPLE_PAPER_METADATA,
             )
 
     @pytest.mark.asyncio
@@ -226,7 +254,10 @@ class TestAddDocument:
 
         with pytest.raises(RuntimeError, match='Unexpected'):
             await doc_db_client.add_document(
-                document=sample_document, name='Sample Document', description='Sample Description'
+                document=sample_document,
+                name='Sample Document',
+                description='Sample Description',
+                paper_metadata=SAMPLE_PAPER_METADATA,
             )
 
 
@@ -275,7 +306,10 @@ class TestAddDocumentWithDataUriImages:
         document = _document_with_image('data:image/jpeg;base64,/9j/2Q==')
 
         doc_meta = await doc_db_client.add_document(
-            document=document, name='PDF Document', description='From PDF'
+            document=document,
+            name='PDF Document',
+            description='From PDF',
+            paper_metadata=SAMPLE_PAPER_METADATA,
         )
 
         get_mock.assert_not_called()
@@ -299,7 +333,10 @@ class TestAddDocumentWithDataUriImages:
 
         with pytest.raises(DocDBClient.DocDBClientError, match='data URI'):
             await doc_db_client.add_document(
-                document=_document_with_image(image_src), name='PDF', description='PDF'
+                document=_document_with_image(image_src),
+                name='PDF',
+                description='PDF',
+                paper_metadata=SAMPLE_PAPER_METADATA,
             )
 
         mock_db_client.write_stream.assert_not_awaited()
@@ -317,6 +354,7 @@ class TestAddDocumentWithDataUriImages:
                 document=_document_with_image('data:image/png;base64,iVBORw0KGgo='),
                 name='PDF',
                 description='PDF',
+                paper_metadata=SAMPLE_PAPER_METADATA,
             )
 
 
@@ -552,6 +590,7 @@ class TestGetDocumentMetadata:
             name='Sample Document',
             description='Sample Description',
             images={'/sections/0/1/0': 'documents/sample_paper_id/images/image1.png'},
+            paper_metadata=SAMPLE_PAPER_METADATA,
         )
         mock_db_client.get_model.return_value = metadata
 
