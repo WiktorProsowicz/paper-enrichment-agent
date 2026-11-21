@@ -18,4 +18,5 @@ footnote_enrichment_service_url: http://footnote-enrichment-agent:8081
 footnote_enrichment_timeout: 300.0
 
 paper_scraping_service_url: http://paper-scraping-service:8083
-paper_scraping_timeout: 120.0
+# Accommodates the marker API conversion of uploaded PDFs
+paper_scraping_timeout: 1900.0

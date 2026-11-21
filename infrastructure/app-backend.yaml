@@ -71,7 +71,7 @@ services:
     restart: unless-stopped
     command: [uv, run, python, -m, paper_enrichment_agent.paper_scraping_service.main, json_logs_path=/var/log/paper-enrichment-agent/paper_scraping_service.jsonl,
       'pdf_parser.marker_api_url=${MARKER_API_URL}', 'pdf_parser.marker_api_token=${MARKER_API_TOKEN}', 'agent_llm_model=${LLM_MODEL}', 'llm_api_key=${LLM_API_KEY}',
-      'paper_access_agent.tools.unpaywall_email=${UNPAYWALL_EMAIL}', 'paper_access_agent.tools.openalex_api_key=${OPENALEX_API_KEY:-}']
+      'paper_access_agent.tools.unpaywall_email=${UNPAYWALL_EMAIL}', 'paper_access_agent.tools.openalex_api_key=${OPENALEX_API_KEY:-}', 'crossref_email=${CROSSREF_EMAIL}']
     volumes:
       - app-logs:/var/log/paper-enrichment-agent
     healthcheck:

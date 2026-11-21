@@ -109,7 +109,8 @@ class AppCfg(pydantic.BaseModel):
         Field(
             description=(
                 'The timeout (in seconds) of a single paper parsing request sent to the '
-                '`paper_scraping_service` service. It has to accommodate the paper download.'
+                '`paper_scraping_service` service. It has to accommodate the paper download and '
+                'the conversion of uploaded PDFs by the marker API.'
             ),
             gt=0,
         ),
@@ -151,6 +152,21 @@ def create_app(service: MainSurveyEnricherService) -> fastapi.FastAPI:
     async def register_arxiv_survey(request: conn_models.ArxivSurveyRegistrationRequest) -> None:
         await service.register_arxiv_survey(
             arxiv_id=request.arxiv_id, name=request.name, description=request.description
+        )
+
+    @app.post('/parse_referenced_paper_pdf')
+    async def parse_referenced_paper_pdf(
+        file: fastapi.UploadFile,
+        survey_id: Annotated[str, fastapi.Form(min_length=1)],
+        reference_id: Annotated[str, fastapi.Form(min_length=1)],
+        doi: Annotated[str, fastapi.Form(min_length=1)],
+    ) -> misc_models.DocumentMetadata:
+        return await service.parse_referenced_paper_pdf(
+            survey_id=survey_id,
+            reference_id=reference_id,
+            pdf_content=await file.read(),
+            file_name=file.filename or '',
+            doi=doi,
         )
 
     @app.post('/remove_survey')

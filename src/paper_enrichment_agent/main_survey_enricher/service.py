@@ -145,6 +145,122 @@ class MainSurveyEnricherService:
                 f'Failed to register the survey for the arXiv paper with ID {arxiv_id}: {e}'
             ) from e
 
+    async def parse_referenced_paper_pdf(
+        self, survey_id: str, reference_id: str, pdf_content: bytes, file_name: str, doi: str
+    ) -> DocumentMetadata:
+        """Adds a paper cited by a survey from its PDF file, supplied manually by the user.
+
+        This is the manual alternative to finding the cited paper with the paper access agent,
+        e.g. for papers without a public version. The PDF file and the DOI are delegated to the
+        `paper_scraping_service` service, which validates and parses the file and fetches the
+        paper's metadata by its DOI. The parsed paper is stored as a new document, named after its
+        title and described by the survey's bibliography entry, and is assigned to that entry (see
+        `SurveyMetadata.referenced_docs`).
+
+        Args:
+            survey_id: The ID of the survey citing the paper.
+            reference_id: The ID of the survey's bibliography entry of the paper (the first
+                element of an entry of `Document.referenced_papers`).
+            pdf_content: The contents of the PDF file of the paper.
+            file_name: The name of the PDF file.
+            doi: The DOI of the paper.
+
+        Returns:
+            The metadata of the stored document.
+        """
+
+        try:
+            start = time.perf_counter()
+            survey_info = await self._doc_db_client.get_survey_info(survey_id)
+            async with self._doc_db_client.get_document_struct_ref(survey_id) as survey:
+                bibliography = dict(survey.referenced_papers)
+            end = time.perf_counter()
+            self._metrics.doc_db_operations_time.observe(end - start)
+
+            if reference_id not in bibliography:
+                raise ValueError(
+                    f'The survey {survey_id} has no bibliography entry with ID {reference_id}.'
+                )
+
+            if (assigned_paper_id := survey_info.referenced_docs.get(reference_id)) is not None:
+                raise ValueError(
+                    f'The document {assigned_paper_id} is already assigned to the reference '
+                    f'{reference_id} of survey {survey_id}.'
+                )
+
+            start = time.perf_counter()
+            parsed_paper = await self._paper_scraping_client.apost_multipart(
+                '/download_pdf_paper',
+                data={'doi': doi},
+                files={'file': (file_name, pdf_content, 'application/pdf')},
+                response_schema=ParsedPaperResponse,
+            )
+            end = time.perf_counter()
+
+            _logger().info(
+                'Successfully parsed the PDF of the referenced paper.',
+                survey_id=survey_id,
+                reference_id=reference_id,
+                file_name=file_name,
+                paper_metadata=parsed_paper.metadata,
+            )
+            self._metrics.papers_parsed.labels(source='pdf', status='success').inc()
+            self._metrics.paper_parsing_time.observe(end - start)
+
+            start = time.perf_counter()
+            doc_metadata = await self._doc_db_client.add_document(
+                document=parsed_paper.document,
+                name=parsed_paper.document.title,
+                description=bibliography[reference_id],
+            )
+            await self._doc_db_client.add_referenced_document(
+                survey_id=survey_id,
+                reference_id=reference_id,
+                referenced_paper_id=doc_metadata.paper_id,
+            )
+            end = time.perf_counter()
+
+            _logger().info(
+                'Successfully assigned the referenced paper to the survey.',
+                survey_id=survey_id,
+                reference_id=reference_id,
+                paper_id=doc_metadata.paper_id,
+            )
+            self._metrics.papers_added.labels(source='pdf').inc()
+            self._metrics.doc_db_operations_time.observe(end - start)
+
+            return doc_metadata
+
+        except HTTPClient.HTTPClientError as e:
+            _logger().error(
+                'Failed to parse the PDF of the referenced paper.',
+                survey_id=survey_id,
+                reference_id=reference_id,
+                file_name=file_name,
+                doi=doi,
+                error=str(e),
+            )
+            self._metrics.papers_parsed.labels(source='pdf', status='failure').inc()
+
+            raise self.MainSurveyEnricherError(
+                f'Failed to parse the PDF {file_name} of the reference {reference_id} of survey '
+                f'{survey_id}: {e}'
+            ) from e
+
+        except (DocDBClient.DocDBClientError, ValueError) as e:
+            _logger().error(
+                'Failed to add the referenced paper to the survey.',
+                survey_id=survey_id,
+                reference_id=reference_id,
+                file_name=file_name,
+                doi=doi,
+                error=str(e),
+            )
+
+            raise self.MainSurveyEnricherError(
+                f'Failed to add the referenced paper {reference_id} to survey {survey_id}: {e}'
+            ) from e
+
     async def remove_survey(self, survey_id: str) -> None:
         """Removes a survey with the given survey ID.
 
@@ -702,12 +818,15 @@ class Metrics:
             namespace='main_survey_enricher',
         )
 
-        self.papers_added.labels(source='arxiv')
+        for source in ('arxiv', 'pdf'):
+            self.papers_added.labels(source=source)
+
+            for status in ('success', 'failure'):
+                self.papers_parsed.labels(source=source, status=status)
 
         for doc_format in SerializedDocFormat:
             for status in ('success', 'failure'):
                 self.documents_rendered.labels(format=doc_format, status=status)
 
         for status in ('success', 'failure'):
-            self.papers_parsed.labels(source='arxiv', status=status)
             self.footnotes_enriched.labels(status=status)

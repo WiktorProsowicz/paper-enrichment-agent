@@ -347,6 +347,160 @@ class TestRegisterArxivSurvey:
             )
 
 
+class TestParseReferencedPaperPdf:
+    SAMPLE_DOI = '10.1145/3065386'
+    SAMPLE_PDF_CONTENT = b'%PDF-1.5 fake content'
+
+    @pytest.fixture
+    def stored_survey(self, sample_survey_document) -> doc_models.Document:
+
+        return sample_survey_document[0]
+
+    @pytest.fixture
+    def parsed_paper(self, ref1_document) -> ParsedPaperResponse:
+
+        return ParsedPaperResponse(
+            document=ref1_document[0],
+            metadata=PaperMetadata(
+                doi=self.SAMPLE_DOI,
+                authors=['Author One'],
+                publication_date=datetime.date(2017, 5, 24),
+            ),
+        )
+
+    @pytest.fixture
+    def mock_db_client(self, stored_survey) -> MagicMock:
+
+        @contextlib.asynccontextmanager
+        async def document_struct_ref(paper_id):
+            yield stored_survey.model_copy(deep=True)
+
+        db_client = MagicMock(spec=DocDBClient)
+        db_client.get_survey_info.return_value = SurveyMetadata(
+            paper_id=SAMPLE_SURVEY_ID, referenced_docs={'ref2': 'ref_paper_id_2'}
+        )
+        db_client.get_document_struct_ref.side_effect = document_struct_ref
+        db_client.add_document.return_value = DocumentMetadata(
+            paper_id='new_paper_id', name='Reference Paper 1', description='desc', images={}
+        )
+
+        return db_client
+
+    @pytest.fixture
+    def mock_scraping_client(self, parsed_paper) -> MagicMock:
+
+        scraping_client = MagicMock(spec=HTTPClient)
+        scraping_client.apost_multipart.return_value = parsed_paper
+
+        return scraping_client
+
+    @pytest.fixture
+    def service(self, mock_metrics, mock_db_client, mock_scraping_client):
+
+        return MainSurveyEnricherService(
+            metrics=mock_metrics,
+            doc_db_client=mock_db_client,
+            rendered_doc_db_client=MagicMock(spec=rendered_doc_db_client.RenderedDocDBClient),
+            footnote_agent_client=MagicMock(spec=HTTPClient),
+            paper_scraping_client=mock_scraping_client,
+        )
+
+    async def call(self, service, reference_id: str = 'ref1') -> DocumentMetadata:
+
+        return await service.parse_referenced_paper_pdf(
+            survey_id=SAMPLE_SURVEY_ID,
+            reference_id=reference_id,
+            pdf_content=self.SAMPLE_PDF_CONTENT,
+            file_name='paper.pdf',
+            doi=self.SAMPLE_DOI,
+        )
+
+    @pytest.mark.asyncio
+    async def test_delegates_pdf_and_assigns_document_to_reference(
+        self, service, mock_scraping_client, mock_db_client, parsed_paper
+    ):
+
+        doc_metadata = await self.call(service)
+
+        assert doc_metadata.paper_id == 'new_paper_id'
+        mock_scraping_client.apost_multipart.assert_called_once_with(
+            '/download_pdf_paper',
+            data={'doi': self.SAMPLE_DOI},
+            files={'file': ('paper.pdf', self.SAMPLE_PDF_CONTENT, 'application/pdf')},
+            response_schema=ParsedPaperResponse,
+        )
+        mock_db_client.add_document.assert_called_once_with(
+            document=parsed_paper.document,
+            name='Reference Paper 1',
+            description='Reference Paper 1',
+        )
+        mock_db_client.add_referenced_document.assert_called_once_with(
+            survey_id=SAMPLE_SURVEY_ID, reference_id='ref1', referenced_paper_id='new_paper_id'
+        )
+
+    @pytest.mark.asyncio
+    async def test_reports_metrics_on_success(self, service, mock_metrics):
+
+        await self.call(service)
+
+        mock_metrics.papers_parsed.labels.assert_called_once_with(source='pdf', status='success')
+        mock_metrics.papers_added.labels.assert_called_once_with(source='pdf')
+        mock_metrics.paper_parsing_time.observe.assert_called_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ('reference_id', 'error'),
+        [('unknown_ref', 'has no bibliography entry'), ('ref2', 'is already assigned')],
+    )
+    async def test_raises_on_invalid_reference_without_parsing(
+        self, service, mock_scraping_client, mock_db_client, reference_id, error
+    ):
+
+        with pytest.raises(MainSurveyEnricherService.MainSurveyEnricherError, match=error):
+            await self.call(service, reference_id=reference_id)
+
+        mock_scraping_client.apost_multipart.assert_not_called()
+        mock_db_client.add_document.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_raises_when_parsing_fails(
+        self, service, mock_scraping_client, mock_db_client, mock_metrics
+    ):
+
+        mock_scraping_client.apost_multipart.side_effect = HTTPClient.HTTPClientError(
+            'HTTP request failed'
+        )
+
+        with pytest.raises(
+            MainSurveyEnricherService.MainSurveyEnricherError,
+            match='Failed to parse the PDF paper.pdf of the reference ref1',
+        ):
+            await self.call(service)
+
+        mock_metrics.papers_parsed.labels.assert_called_once_with(source='pdf', status='failure')
+        mock_db_client.add_document.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_raises_when_db_operation_fails(self, service, mock_db_client, mock_metrics):
+
+        mock_db_client.add_referenced_document.side_effect = DocDBClient.DocDBClientError(
+            'DB failure'
+        )
+
+        with pytest.raises(MainSurveyEnricherService.MainSurveyEnricherError, match='DB failure'):
+            await self.call(service)
+
+        mock_metrics.papers_added.labels.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_does_not_swallow_unexpected_errors(self, service, mock_scraping_client):
+
+        mock_scraping_client.apost_multipart.side_effect = RuntimeError('Unexpected failure')
+
+        with pytest.raises(RuntimeError, match='Unexpected failure'):
+            await self.call(service)
+
+
 class TestRemoveSurvey:
     @pytest.fixture
     def mock_db_client(self) -> MagicMock:
