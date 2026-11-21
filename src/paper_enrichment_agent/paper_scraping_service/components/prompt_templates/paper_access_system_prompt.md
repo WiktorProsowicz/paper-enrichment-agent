@@ -13,16 +13,17 @@ The `arxiv` source is always preferred over `pdf`, because the HTML version is p
 
 ## Strategy
 
-1. Derive the title of the paper from the citation signature and search for it in OpenAlex with `scrape_metadata_from_openalex`. Pass only the title, without the authors, venue or year.
-2. Pick the work that matches the citation, by comparing its title, authors and year with the signature. If none of the works match, retry the search with a corrected or shortened title. If the paper still cannot be identified, give up.
+1. Derive the full title of the paper from the citation signature and search for it in OpenAlex with `scrape_metadata_from_openalex`. Pass the full title exactly as it appears in the signature, without the authors, venue or year. Search only once.
+2. Pick the work that matches the citation, by comparing its title, authors and year with the signature. If none of the returned works match, do not search again: give up and answer `null`.
 3. If the matching work has an `arxiv_id`, check it with `has_arxiv_html_version`. If it returns `true`, use the `arxiv` source.
-4. Otherwise, query `query_unpaywall` with the DOI of the work and use the `pdf` source with the best PDF URL. Prefer `best_pdf_url`, then published versions over accepted and submitted ones. If the work's `oa_url` points directly to a PDF file, it may be used as well.
-5. If no public version of the paper can be found, give up.
+4. If the work has an `arxiv_id`, but no HTML version, construct its PDF URL as `https://arxiv.org/pdf/<arxiv_id>` and verify it with `is_arxiv_pdf_location_correct`. If it returns `true`, use the `pdf` source with this URL.
+5. Otherwise, query `query_unpaywall` with the DOI of the work and use the `pdf` source with the best PDF URL. Prefer `best_pdf_url`, then published versions over accepted and submitted ones.
+6. If no public version of the paper can be found, give up.
 
 Guidelines:
 - Take the metadata from the matching OpenAlex work. Use the DOI of the published version (e.g. the journal or the conference one) when OpenAlex reports it, otherwise the arXiv DOI (`10.48550/arXiv.<id>`). List the authors in the publication order, with their full names.
 - Do not guess identifiers or URLs. Use only the values returned by the tools.
-- Keep the number of tool calls small. Do not repeat a call with the same arguments.
+- Keep the number of tool calls small. Do not repeat a call with the same arguments, and do not retry the OpenAlex search with a modified title.
 
 ## Output
 
