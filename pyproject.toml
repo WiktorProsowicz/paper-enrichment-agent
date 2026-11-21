@@ -17,6 +17,7 @@ dependencies = [
     "mlflow>=3.16.0",
     "prometheus-client>=0.26.0",
     "pydantic>=2.13.4",
+    "python-multipart>=0.0.32",
     "requests>=2.34.2",
     "structlog>=26.1.0",
     "uvicorn>=0.52.3",
