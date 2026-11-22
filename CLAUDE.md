@@ -15,8 +15,12 @@ LiteLLM, FastMCP / `mcp`, MLflow (tracing and LLM evaluation), structlog, promet
 
 ## Skills
 
-Project skills live in `.claude/skills/<skill-name>/SKILL.md`. There are no project skills yet.
-When you add one, list it here with a one-line description of when to use it.
+Project skills live in `.claude/skills/<skill-name>/SKILL.md`. When you add one, list it here
+with a one-line description of when to use it.
+
+- `agent-spec`: write or update the specification of an agent in `docs/agents_spec/<agent_name>/`.
+  Use it before implementing a new agent or a change of its graph, prompts, tools, inputs or
+  outputs.
 
 ## Coding guidelines
 

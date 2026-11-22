@@ -136,6 +136,8 @@ tests/
 
 infrastructure/                     # Dockerfile, compose stacks and observability config
 docs/                               # Architecture and evaluation diagrams (draw.io PNGs)
+└── agents_spec/<agent_name>/       # Agent specifications: core, inputs/outputs, tools, procedures
+.claude/skills/                     # Claude Code project skills (agent-spec)
 .devcontainer/                      # Dev environment (Ubuntu, just, uv, docker-in-docker)
 justfile                            # All the development and deployment workflows
 ```
